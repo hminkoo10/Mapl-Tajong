@@ -4,12 +4,13 @@ from PyQt6.QtWidgets import QApplication
 
 from app.data.db import connect, init_schema
 from app.core.bootstrap import seed_if_empty
+from app.core.paths import resource_path
 from app.ui.main_window import MainWindow
 from PyQt6.QtGui import QFont
 
 def read_schema():
-    path = Path(__file__).resolve().parent / "data" / "schema.sql"
-    return path.read_text(encoding="utf-8")
+    p = resource_path("app", "data", "schema.sql")
+    return p.read_text(encoding="utf-8")
 
 def main():
     conn = connect()

@@ -26,3 +26,11 @@ def app_root():
 
 def asset_path(*parts):
     return app_root().joinpath("assets", *parts)
+
+def base_dir():
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parents[2]
+
+def resource_path(*parts):
+    return base_dir().joinpath(*parts)
