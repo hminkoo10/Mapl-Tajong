@@ -14,19 +14,20 @@ def delete_sound(conn, sound_id):
     conn.execute("DELETE FROM sounds WHERE id=?", (int(sound_id),))
     conn.commit()
 
-def list_schedules(conn):
+def list_schedules(conn, set_id):
     return conn.execute("""
         SELECT s.*, so.name AS sound_name, so.file_name AS sound_file_name, so.volume AS sound_volume
         FROM schedules s
         JOIN sounds so ON so.id = s.sound_id
+        WHERE s.set_id = ?
         ORDER BY s.time_hhmm ASC, s.id ASC
-    """).fetchall()
+    """, (int(set_id),)).fetchall()
 
-def insert_schedule(conn, name, weekday_mask, time_hhmm, sound_id, volume_override, enabled):
+def insert_schedule(conn, set_id, name, weekday_mask, time_hhmm, sound_id, volume_override, enabled):
     conn.execute("""
-        INSERT INTO schedules(name, weekday_mask, time_hhmm, sound_id, volume_override, enabled, sort_order)
-        VALUES(?,?,?,?,?,?,0)
-    """, (name, int(weekday_mask), time_hhmm, int(sound_id),
+        INSERT INTO schedules(set_id, name, weekday_mask, time_hhmm, sound_id, volume_override, enabled)
+        VALUES(?,?,?,?,?,?,?)
+    """, (int(set_id), name, int(weekday_mask), time_hhmm, int(sound_id),
           None if volume_override is None else float(volume_override),
           int(enabled)))
     conn.commit()
@@ -142,3 +143,42 @@ def clear_transient_overrides(conn, date_yyyymmdd):
         (date_yyyymmdd,)
     )
     conn.commit()
+
+def list_schedule_sets(conn):
+    return conn.execute("SELECT * FROM schedule_sets ORDER BY id ASC").fetchall()
+
+def insert_schedule_set(conn, name):
+    conn.execute("INSERT INTO schedule_sets(name) VALUES(?)", (name,))
+    conn.commit()
+    return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+def rename_schedule_set(conn, set_id, name):
+    conn.execute("UPDATE schedule_sets SET name=? WHERE id=?", (name, int(set_id)))
+    conn.commit()
+
+def delete_schedule_set(conn, set_id):
+    conn.execute("DELETE FROM schedules WHERE set_id=?", (int(set_id),))
+    conn.execute("DELETE FROM schedule_sets WHERE id=?", (int(set_id),))
+    conn.commit()
+
+def get_setting(conn, key, default_value=""):
+    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return row[0] if row else default_value
+
+def set_setting(conn, key, value):
+    conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (key, str(value)))
+    conn.commit()
+
+def active_set_id(conn):
+    row = conn.execute(
+        "SELECT value FROM settings WHERE key='active_set_id'"
+    ).fetchone()
+    if not row:
+        return 0
+    try:
+        return int(row[0])
+    except:
+        return 0
+
+def set_active_set(conn, set_id):
+    set_setting(conn, "active_set_id", int(set_id))

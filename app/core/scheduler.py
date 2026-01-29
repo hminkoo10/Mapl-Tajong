@@ -117,7 +117,10 @@ class Scheduler:
 
     def recompute_next(self):
         now = datetime.now()
-        schedules = repo.list_schedules(self.conn)
+        today = datetime.now().strftime("%Y-%m-%d")
+        repo.clear_transient_overrides(self.conn, today)
+        set_id = repo.active_set_id(self.conn)
+        schedules = repo.list_schedules(self.conn, set_id)
         best = None
 
         for day_offset in range(0, 8):
@@ -161,7 +164,8 @@ class Scheduler:
         self.next_event = best
 
     def _first_event_from(self, base):
-        schedules = repo.list_schedules(self.conn)
+        set_id = repo.active_set_id(self.conn)
+        schedules = repo.list_schedules(self.conn, set_id)
         best = None
         today = base.strftime("%Y-%m-%d")
         for s in schedules:

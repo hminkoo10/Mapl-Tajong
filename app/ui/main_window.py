@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTabWidget, QTableWidget, QTableWidgetItem, QMessageBox, QComboBox,
     QCheckBox, QLineEdit, QDateEdit, QSpinBox, QFrame, QToolBar, QDialog,
-    QGroupBox, QHeaderView, QAbstractItemView, QSystemTrayIcon, QMenu
+    QGroupBox, QHeaderView, QAbstractItemView, QSystemTrayIcon, QMenu, QInputDialog
 )
 from PyQt6.QtCore import QTimer, QDate, Qt
 from PyQt6.QtGui import QIcon, QAction
@@ -447,6 +447,21 @@ class MainWindow(QMainWindow):
         bar_layout.addWidget(btn_del)
         bar_layout.addStretch(1)
 
+        bar_layout.addWidget(QLabel("세트"))
+        self.sch_set_combo = QComboBox()
+        bar_layout.addWidget(self.sch_set_combo)
+
+        btn_set_add = QPushButton("세트 추가")
+        btn_set_rename = QPushButton("이름변경")
+        btn_set_del = QPushButton("세트 삭제")
+        btn_set_add.setObjectName("Ghost")
+        btn_set_rename.setObjectName("Ghost")
+        btn_set_del.setObjectName("Ghost")
+
+        bar_layout.addWidget(btn_set_add)
+        bar_layout.addWidget(btn_set_rename)
+        bar_layout.addWidget(btn_set_del)
+
         bar_layout.addWidget(QLabel("요일"))
         self.sch_day_filter = QComboBox()
         self.sch_day_filter.addItem("전체", 0)
@@ -491,7 +506,11 @@ class MainWindow(QMainWindow):
         btn_add.clicked.connect(self.on_add_schedule)
         btn_edit.clicked.connect(self.on_edit_schedule)
         btn_del.clicked.connect(self.on_delete_schedule)
+        btn_set_add.clicked.connect(self.on_add_schedule_set)
+        btn_set_rename.clicked.connect(self.on_rename_schedule_set)
+        btn_set_del.clicked.connect(self.on_delete_schedule_set)
 
+        self.sch_set_combo.currentIndexChanged.connect(self.on_change_schedule_set)
         self.schedule_table.cellDoubleClicked.connect(lambda r, c: self.on_edit_schedule())
         self.sch_day_filter.currentIndexChanged.connect(self.refresh_schedules)
 
@@ -699,6 +718,7 @@ class MainWindow(QMainWindow):
         self.refresh_logs()
         self.refresh_sounds()
         self.refresh_schedules()
+        self.refresh_schedule_sets()
         self.refresh_ops_sounds()
 
         self.scheduler.recompute_next()
@@ -732,7 +752,8 @@ class MainWindow(QMainWindow):
             self.sound_table.setItem(r, 3, QTableWidgetItem(self._vol_to_percent_text(s["volume"])))
 
     def refresh_schedules(self):
-        schedules = repo.list_schedules(self.conn)
+        set_id = repo.active_set_id(self.conn)
+        schedules = repo.list_schedules(self.conn, set_id)
         day_bit = int(self.sch_day_filter.currentData() or 0)
         if day_bit != 0:
             schedules = [s for s in schedules if (int(s["weekday_mask"]) & day_bit) != 0]
@@ -866,7 +887,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "오류", "이벤트명과 요일을 설정해 주세요.")
             return
 
-        repo.insert_schedule(self.conn, name, mask, t, sound_id, v_override, enabled)
+        set_id = repo.active_set_id(self.conn)
+        repo.insert_schedule(self.conn, set_id, name, mask, t, sound_id, v_override, enabled)
 
         repo.clear_transient_overrides(self.conn, self._today_str())
         self.scheduler.recompute_next()
@@ -876,8 +898,8 @@ class MainWindow(QMainWindow):
         schedule_id = self._selected_row_id(self.schedule_table)
         if not schedule_id:
             return
-
-        schedules = repo.list_schedules(self.conn)
+        set_id = repo.active_set_id(self.conn)
+        schedules = repo.list_schedules(self.conn, set_id)
         data = None
         for s in schedules:
             if int(s["id"]) == int(schedule_id):
@@ -1047,3 +1069,103 @@ class MainWindow(QMainWindow):
 
         self._really_quit = True
         self.app.quit()
+
+    def refresh_schedule_sets(self):
+        sets = repo.list_schedule_sets(self.conn)
+        active_id = repo.active_set_id(self.conn)
+
+        self.sch_set_combo.blockSignals(True)
+        self.sch_set_combo.clear()
+
+        pick = 0
+        for i, s in enumerate(sets):
+            sid = int(s["id"])
+            self.sch_set_combo.addItem(str(s["name"]), sid)
+            if sid == active_id:
+                pick = i
+
+        if sets:
+            self.sch_set_combo.setCurrentIndex(pick)
+
+        self.sch_set_combo.blockSignals(False)
+
+    def on_change_schedule_set(self):
+        sid = self.sch_set_combo.currentData()
+        if sid is None:
+            return
+        repo.set_active_set(self.conn, int(sid))
+        repo.clear_transient_overrides(self.conn, self._today_str())
+        self.scheduler.recompute_next()
+        self.refresh_all()
+
+    def on_add_schedule_set(self):
+        name, ok = QInputDialog.getText(self, "세트 추가", "세트 이름")
+        if not ok:
+            return
+        name = (name or "").strip()
+        if not name:
+            return
+        try:
+            sid = repo.insert_schedule_set(self.conn, name)
+            repo.set_active_set(self.conn, sid)
+            self.refresh_schedule_sets()
+            repo.clear_transient_overrides(self.conn, self._today_str())
+            self.scheduler.recompute_next()
+            self.refresh_all()
+        except Exception as e:
+            QMessageBox.warning(self, "오류", str(e))
+
+    def on_rename_schedule_set(self):
+        sid = self.sch_set_combo.currentData()
+        if sid is None:
+            return
+        cur = self.sch_set_combo.currentText()
+        name, ok = QInputDialog.getText(self, "이름변경", "새 이름", text=cur)
+        if not ok:
+            return
+        name = (name or "").strip()
+        if not name:
+            return
+        try:
+            repo.rename_schedule_set(self.conn, int(sid), name)
+            self.refresh_schedule_sets()
+        except Exception as e:
+            QMessageBox.warning(self, "오류", str(e))
+
+    def on_delete_schedule_set(self):
+        sets = repo.list_schedule_sets(self.conn)
+        if len(sets) <= 1:
+            QMessageBox.information(self, "알림", "세트는 최소 1개가 필요합니다.")
+            return
+
+        sid = self.sch_set_combo.currentData()
+        if sid is None:
+            return
+
+        ok = QMessageBox.question(self, "확인", "현재 세트를 삭제할까요?\n(해당 세트의 시간표도 함께 삭제됩니다.)")
+        if ok != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            repo.delete_schedule_set(self.conn, int(sid))
+            remain = repo.list_schedule_sets(self.conn)
+            repo.set_active_set(self.conn, int(remain[0]["id"]))
+            self.refresh_schedule_sets()
+            repo.clear_transient_overrides(self.conn, self._today_str())
+            self.scheduler.recompute_next()
+            self.refresh_all()
+        except Exception as e:
+            QMessageBox.warning(self, "오류", str(e))
+
+    def on_change_schedule_set(self):
+        sid = self.sch_set_combo.currentData()
+        if sid is None:
+            return
+
+        repo.set_active_set(self.conn, int(sid))
+
+        repo.clear_transient_overrides(self.conn, self._today_str())
+        self.scheduler.recompute_next()
+
+        self.refresh_schedules()
+        self.on_tick()

@@ -40,3 +40,9 @@ CREATE TABLE IF NOT EXISTS overrides (
   applied_at TEXT NOT NULL DEFAULT (datetime('now')),
   note TEXT
 );
+
+CREATE TABLE IF NOT EXISTS schedule_sets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
