@@ -32,5 +32,10 @@ def base_dir():
         return Path(sys._MEIPASS)
     return Path(__file__).resolve().parents[2]
 
+def amp_cache_dir():
+    d = app_data_dir() / "amp_cache"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
 def resource_path(*parts):
     return base_dir().joinpath(*parts)

@@ -17,11 +17,11 @@ VSVersionInfo(
           [
             StringStruct('CompanyName', 'Mapl'),
             StringStruct('FileDescription', 'Mapl Tajong'),
-            StringStruct('FileVersion', '1.0.0'),
+            StringStruct('FileVersion', '1.0.1'),
             StringStruct('InternalName', 'MaplTajong'),
             StringStruct('OriginalFilename', 'MaplTajong.exe'),
             StringStruct('ProductName', 'Mapl Tajong'),
-            StringStruct('ProductVersion', '1.0.0')
+            StringStruct('ProductVersion', '1.0.1')
           ]
         )
       ]

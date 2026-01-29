@@ -19,27 +19,27 @@ def list_schedules(conn):
         SELECT s.*, so.name AS sound_name, so.file_name AS sound_file_name, so.volume AS sound_volume
         FROM schedules s
         JOIN sounds so ON so.id = s.sound_id
-        ORDER BY s.sort_order, s.time_hhmm
+        ORDER BY s.time_hhmm ASC, s.id ASC
     """).fetchall()
 
-def insert_schedule(conn, name, weekday_mask, time_hhmm, sound_id, volume_override, enabled, sort_order):
+def insert_schedule(conn, name, weekday_mask, time_hhmm, sound_id, volume_override, enabled):
     conn.execute("""
         INSERT INTO schedules(name, weekday_mask, time_hhmm, sound_id, volume_override, enabled, sort_order)
-        VALUES(?,?,?,?,?,?,?)
+        VALUES(?,?,?,?,?,?,0)
     """, (name, int(weekday_mask), time_hhmm, int(sound_id),
           None if volume_override is None else float(volume_override),
-          int(enabled), int(sort_order)))
+          int(enabled)))
     conn.commit()
     return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-def update_schedule(conn, schedule_id, name, weekday_mask, time_hhmm, sound_id, volume_override, enabled, sort_order):
+def update_schedule(conn, schedule_id, name, weekday_mask, time_hhmm, sound_id, volume_override, enabled):
     conn.execute("""
         UPDATE schedules
-        SET name=?, weekday_mask=?, time_hhmm=?, sound_id=?, volume_override=?, enabled=?, sort_order=?, updated_at=datetime('now')
+        SET name=?, weekday_mask=?, time_hhmm=?, sound_id=?, volume_override=?, enabled=?, updated_at=datetime('now')
         WHERE id=?
     """, (name, int(weekday_mask), time_hhmm, int(sound_id),
           None if volume_override is None else float(volume_override),
-          int(enabled), int(sort_order), int(schedule_id)))
+          int(enabled), int(schedule_id)))
     conn.commit()
 
 def delete_schedule(conn, schedule_id):

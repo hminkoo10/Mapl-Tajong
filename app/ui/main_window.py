@@ -1,15 +1,13 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTabWidget, QTableWidget, QTableWidgetItem, QMessageBox, QComboBox,
-    QCheckBox, QLineEdit, QDateEdit, QSpinBox, QFrame, QToolBar,
+    QCheckBox, QLineEdit, QDateEdit, QSpinBox, QFrame, QToolBar, QDialog,
     QGroupBox, QHeaderView, QAbstractItemView, QSystemTrayIcon, QMenu
 )
 from PyQt6.QtCore import QTimer, QDate, Qt
 from PyQt6.QtGui import QIcon, QAction
-from app.core.paths import asset_path
 
 from pathlib import Path
-
 import shutil
 from datetime import datetime
 
@@ -19,6 +17,7 @@ from app.ui.dialogs import AddSoundDialog, ScheduleDialog, EditSoundDialog
 from app.core.player import SoundPlayer
 from app.core.scheduler import Scheduler
 from app.core.startup import is_startup_enabled, enable_startup, disable_startup
+
 
 class MainWindow(QMainWindow):
     def __init__(self, conn, app):
@@ -33,6 +32,8 @@ class MainWindow(QMainWindow):
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
@@ -46,16 +47,13 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_ops, "운영")
         self.tabs.addTab(self.tab_sounds, "종소리")
         self.tabs.addTab(self.tab_schedules, "시간표")
-        self.tabs.addTab(self.tab_ops, "운영")
-        self.tabs.addTab(self.tab_sounds, "종소리")
-        self.tabs.addTab(self.tab_schedules, "시간표")
         self.tabs.addTab(self.tab_logs, "로그")
         self.tabs.addTab(self.tab_settings, "설정")
 
-        self._build_logs()
         self._build_ops()
         self._build_sounds()
         self._build_schedules()
+        self._build_logs()
         self._build_settings()
 
         self._apply_style()
@@ -64,15 +62,15 @@ class MainWindow(QMainWindow):
         self._init_window_icon()
 
         self.refresh_all()
-
         self.scheduler.start()
 
         self.timer = QTimer(self)
         self.timer.setInterval(250)
         self.timer.timeout.connect(self.on_tick)
         self.timer.start()
+
         self.setMinimumSize(980, 720)
-    
+
     def _apply_style(self):
         self.setStyleSheet("""
         * {
@@ -169,37 +167,23 @@ class MainWindow(QMainWindow):
             border-color: rgba(0,0,0,0.10);
             background: rgba(0,0,0,0.03);
         }
-                           
-        QMenuBar {
-            background: #f6f7fb;
-            padding: 2px 6px;
-            border: 0;
-        }
-
-        QMenuBar::item {
-            background: transparent;
-            padding: 0px 6px;
-        }
-
-        QPushButton#MenuExit {
-            background: #ffffff;
-            border: 1px solid rgba(200, 0, 0, 0.35);
-            color: rgb(150, 0, 0);
-            padding: 6px 12px;
-            border-radius: 10px;
-        }
-
-        QPushButton#MenuExit:hover {
-            background: rgba(200, 0, 0, 0.06);
-        }
-
-        QPushButton#MenuExit:pressed {
-            background: rgba(200, 0, 0, 0.12);
-        }
 
         QPushButton#Ghost {
             background: #ffffff;
             border: 1px solid rgba(0,0,0,0.16);
+        }
+
+        QPushButton#Danger {
+            border: 1px solid rgba(200, 0, 0, 0.35);
+            color: rgb(150, 0, 0);
+        }
+
+        QPushButton#Danger:hover {
+            background: rgba(200, 0, 0, 0.06);
+        }
+
+        QPushButton#Danger:pressed {
+            background: rgba(200, 0, 0, 0.12);
         }
 
         QComboBox, QDateEdit, QDateTimeEdit, QLineEdit {
@@ -242,20 +226,7 @@ class MainWindow(QMainWindow):
         QMessageBox QPushButton {
             min-width: 90px;
         }
-        
-        QPushButton#Danger {
-            border: 1px solid rgba(200, 0, 0, 0.35);
-            color: rgb(150, 0, 0);
-        }
 
-        QPushButton#Danger:hover {
-            background: rgba(200, 0, 0, 0.06);
-        }
-
-        QPushButton#Danger:pressed {
-            background: rgba(200, 0, 0, 0.12);
-        }
-        
         QToolBar {
             background: #f6f7fb;
             border: 0;
@@ -285,7 +256,6 @@ class MainWindow(QMainWindow):
         }
         """)
 
-    
     def _format_remaining(self, seconds):
         if seconds < 0:
             seconds = 0
@@ -301,21 +271,23 @@ class MainWindow(QMainWindow):
             return f"{days}일 {hours:02d}:{minutes:02d}:{secs:02d}"
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
-    def clear_transient_overrides(conn, date_yyyymmdd):
-        conn.execute(
-            "DELETE FROM overrides WHERE date_yyyymmdd=? AND action IN ('SKIP_ONCE','FIRED_ONCE')",
-            (date_yyyymmdd,)
-        )
-        conn.commit()
-
     def _mask_to_days(self, mask):
-        items = [("월",1),("화",2),("수",4),("목",8),("금",16),("토",32),("일",64)]
+        items = [("월", 1), ("화", 2), ("수", 4), ("목", 8), ("금", 16), ("토", 32), ("일", 64)]
         m = int(mask)
         s = []
         for name, bit in items:
             if (m & bit) != 0:
                 s.append("[" + name + "]")
         return " ".join(s) if s else "-"
+
+    def _today_str(self):
+        return datetime.now().strftime("%Y-%m-%d")
+
+    def _vol_to_percent_text(self, v):
+        try:
+            return f"{int(round(float(v) * 100))}%"
+        except:
+            return "-"
 
     def _build_ops(self):
         layout = QVBoxLayout(self.tab_ops)
@@ -402,7 +374,7 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
 
     def on_toggle_pause_today(self):
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = self._today_str()
         repo.set_pause_today(self.conn, today, self.chk_pause_today.isChecked())
 
     def _build_sounds(self):
@@ -438,12 +410,13 @@ class MainWindow(QMainWindow):
         self.sound_table.horizontalHeader().setStretchLastSection(True)
         self.sound_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.sound_table.cellDoubleClicked.connect(lambda r, c: self.on_edit_sound())
+
         hdr = self.sound_table.horizontalHeader()
         hdr.setStretchLastSection(False)
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)        
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)         
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)           
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
 
         self.sound_table.setColumnWidth(3, 90)
         self.sound_table.setColumnHidden(0, True)
@@ -472,7 +445,6 @@ class MainWindow(QMainWindow):
         bar_layout.addWidget(btn_add)
         bar_layout.addWidget(btn_edit)
         bar_layout.addWidget(btn_del)
-
         bar_layout.addStretch(1)
 
         bar_layout.addWidget(QLabel("요일"))
@@ -490,9 +462,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(bar)
 
         self.schedule_table = QTableWidget()
-        self.schedule_table.setColumnCount(8)
+        self.schedule_table.setColumnCount(7)
         self.schedule_table.setHorizontalHeaderLabels(
-            ["ID", "활성", "요일", "시간", "이벤트명", "종소리", "음량", "정렬"]
+            ["ID", "활성", "요일", "시간", "이벤트명", "종소리", "음량"]
         )
         self.schedule_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.schedule_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -503,17 +475,16 @@ class MainWindow(QMainWindow):
         self.schedule_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
         self.schedule_table.setColumnHidden(0, True)
-        self.schedule_table.setColumnHidden(7, True)
         self.schedule_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
 
         hdr = self.schedule_table.horizontalHeader()
         hdr.setStretchLastSection(False)
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) 
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) 
-        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)          
-        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)         
-        hdr.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents) 
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
 
         layout.addWidget(self.schedule_table)
 
@@ -524,225 +495,10 @@ class MainWindow(QMainWindow):
         self.schedule_table.cellDoubleClicked.connect(lambda r, c: self.on_edit_schedule())
         self.sch_day_filter.currentIndexChanged.connect(self.refresh_schedules)
 
-    def on_tick(self):
-        self.scheduler.tick()
-
-        now = datetime.now()
-        self.label_now.setText(now.strftime("현재: %Y-%m-%d %H:%M:%S"))
-
-        ev = self.scheduler.next_event
-        if ev:
-            remain = int((ev.run_at - now).total_seconds())
-            self.label_next.setText(
-                f'다음: {ev.run_at.strftime("%Y-%m-%d %H:%M:%S")}  {ev.name}  ({ev.sound_name})  남은시간 {self._format_remaining(remain)}'
-            )
-        else:
-            self.label_next.setText("다음: 없음")
-
-        state = "실행중"
-        if repo.is_pause_today(self.conn, datetime.now().strftime("%Y-%m-%d")):
-            state = "오늘 자동정지"
-        elif self.scheduler.paused:
-            state = "일시정지"
-        self.label_state.setText(f"상태: {state}")
-
-
-    def refresh_all(self):
-        self.refresh_logs()
-        self.refresh_sounds()
-        self.refresh_schedules()
-        self.refresh_ops_sounds()
-        self.scheduler.recompute_next()
-        today = datetime.now().strftime("%Y-%m-%d")
-        self.chk_pause_today.blockSignals(True)
-        self.chk_pause_today.setChecked(repo.is_pause_today(self.conn, today))
-        self.chk_pause_today.blockSignals(False)
-
-    def refresh_ops_sounds(self):
-        self.ops_sound_combo.clear()
-        sounds = repo.list_sounds(self.conn)
-
-        pick_index = 0
-        for i, s in enumerate(sounds):
-            name = str(s["name"])
-            self.ops_sound_combo.addItem(name, int(s["id"]))
-            if name.lower().startswith("bell"):
-                pick_index = i
-
-        if sounds:
-            self.ops_sound_combo.setCurrentIndex(pick_index)
-
-    def refresh_sounds(self):
-        sounds = repo.list_sounds(self.conn)
-        self.sound_table.setRowCount(len(sounds))
-        for r, s in enumerate(sounds):
-            self.sound_table.setItem(r, 0, QTableWidgetItem(str(s["id"])))
-            self.sound_table.setItem(r, 1, QTableWidgetItem(str(s["name"])))
-            self.sound_table.setItem(r, 2, QTableWidgetItem(str(s["file_name"])))
-            self.sound_table.setItem(r, 3, QTableWidgetItem(str(s["volume"])))
-
-    def refresh_schedules(self):
-        schedules = repo.list_schedules(self.conn)
-        day_bit = int(self.sch_day_filter.currentData() or 0)
-        if day_bit != 0:
-            schedules = [s for s in schedules if (int(s["weekday_mask"]) & day_bit) != 0]
-        self.schedule_table.setRowCount(len(schedules))
-        for r, s in enumerate(schedules):
-            self.schedule_table.setItem(r, 0, QTableWidgetItem(str(s["id"])))
-            self.schedule_table.setItem(r, 1, QTableWidgetItem("ON" if int(s["enabled"]) == 1 else "OFF"))
-            self.schedule_table.setItem(r, 2, QTableWidgetItem(self._mask_to_days(s["weekday_mask"])))
-            self.schedule_table.setItem(r, 3, QTableWidgetItem(str(s["time_hhmm"])))
-            self.schedule_table.setItem(r, 4, QTableWidgetItem(str(s["name"])))
-            self.schedule_table.setItem(r, 5, QTableWidgetItem(str(s["sound_name"])))
-            v = s["volume_override"] if s["volume_override"] is not None else s["sound_volume"]
-            self.schedule_table.setItem(r, 6, QTableWidgetItem(str(v)))
-            self.schedule_table.setItem(r, 7, QTableWidgetItem(str(s["sort_order"])))
-
-    def _selected_row_id(self, table):
-        row = table.currentRow()
-        if row < 0:
-            return None
-        item = table.item(row, 0)
-        if not item:
-            return None
-        try:
-            return int(item.text())
-        except:
-            return None
-
-    def on_add_sound(self):
-        dlg = AddSoundDialog(self)
-        if dlg.exec() != dlg.DialogCode.Accepted:
-            return
-        name, src_path, volume = dlg.get_value()
-        if not name or not src_path:
-            QMessageBox.warning(self, "오류", "이름과 파일을 선택해 주세요.")
-            return
-
-        ext = Path(src_path).suffix.lower()
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        file_name = f"{stamp}{ext}"
-        dst = sounds_dir() / file_name
-        shutil.copy2(src_path, dst)
-
-        repo.insert_sound(self.conn, name, file_name, volume)
-        self.refresh_all()
-
-    def on_edit_sound(self):
-        sound_id = self._selected_row_id(self.sound_table)
-        if not sound_id:
-            return
-
-        s = self.conn.execute("SELECT * FROM sounds WHERE id=?", (int(sound_id),)).fetchone()
-        if not s:
-            return
-
-        dlg = EditSoundDialog(str(s["name"]), float(s["volume"]), self)
-        if dlg.exec() != dlg.DialogCode.Accepted:
-            return
-
-        name, vol = dlg.get_value()
-        if not name:
-            QMessageBox.warning(self, "오류", "이름을 입력해 주세요.")
-            return
-
-        repo.update_sound(self.conn, sound_id, name, vol)
-        self.scheduler.recompute_next()
-        self.refresh_all()
-
-    def on_delete_sound(self):
-        sound_id = self._selected_row_id(self.sound_table)
-        if not sound_id:
-            return
-        row = self.sound_table.currentRow()
-        file_name = self.sound_table.item(row, 2).text()
-
-        ok = QMessageBox.question(self, "확인", "삭제할까요?")
-        if ok != QMessageBox.StandardButton.Yes:
-            return
-
-        repo.delete_sound(self.conn, sound_id)
-
-        p = sound_file_path(file_name)
-        if p.exists():
-            try:
-                p.unlink()
-            except:
-                pass
-
-        self.refresh_all()
-        repo.clear_transient_overrides(self.conn, self._today_str())
-        self.scheduler.recompute_next()
-        self.refresh_all()
-
-    def on_add_schedule(self):
-        sounds = repo.list_sounds(self.conn)
-        if not sounds:
-            QMessageBox.warning(self, "오류", "종소리를 먼저 추가해 주세요.")
-            return
-        dlg = ScheduleDialog(sounds, None, self)
-        if dlg.exec() != dlg.DialogCode.Accepted:
-            return
-        name, mask, t, sound_id, v_override, enabled, sort_order = dlg.get_value()
-        if not name or mask == 0:
-            QMessageBox.warning(self, "오류", "이벤트명과 요일을 설정해 주세요.")
-            return
-        repo.insert_schedule(self.conn, name, mask, t, sound_id, v_override, enabled, sort_order)
-        self.refresh_all()
-        repo.clear_transient_overrides(self.conn, self._today_str())
-        self.scheduler.recompute_next()
-        self.refresh_all()
-
-    def on_edit_schedule(self):
-        schedule_id = self._selected_row_id(self.schedule_table)
-        if not schedule_id:
-            return
-
-        schedules = repo.list_schedules(self.conn)
-        data = None
-        for s in schedules:
-            if int(s["id"]) == int(schedule_id):
-                data = s
-                break
-        if not data:
-            return
-
-        sounds = repo.list_sounds(self.conn)
-        dlg = ScheduleDialog(sounds, data, self)
-        if dlg.exec() != dlg.DialogCode.Accepted:
-            return
-        name, mask, t, sound_id, v_override, enabled, sort_order = dlg.get_value()
-        repo.update_schedule(self.conn, schedule_id, name, mask, t, sound_id, v_override, enabled, sort_order)
-        self.refresh_all()
-        repo.clear_transient_overrides(self.conn, self._today_str())
-        self.scheduler.recompute_next()
-        self.refresh_all()
-
-    def on_delete_schedule(self):
-        schedule_id = self._selected_row_id(self.schedule_table)
-        if not schedule_id:
-            return
-        ok = QMessageBox.question(self, "확인", "삭제할까요?")
-        if ok != QMessageBox.StandardButton.Yes:
-            return
-        repo.delete_schedule(self.conn, schedule_id)
-        self.refresh_all()
-
-    def on_ring_selected_sound(self):
-        sid = self.ops_sound_combo.currentData()
-        if sid is None:
-            return
-        s = self.conn.execute("SELECT * FROM sounds WHERE id=?", (int(sid),)).fetchone()
-        if not s:
-            return
-        p = sound_file_path(str(s["file_name"]))
-        try:
-            self.player.play(str(p), float(s["volume"]))
-        except Exception as e:
-            QMessageBox.warning(self, "오류", str(e))
-
     def _build_logs(self):
         layout = QVBoxLayout(self.tab_logs)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
 
         top = QHBoxLayout()
 
@@ -777,6 +533,7 @@ class MainWindow(QMainWindow):
         top.addWidget(self.log_limit)
 
         self.btn_log_refresh = QPushButton("새로고침")
+        self.btn_log_refresh.setObjectName("Ghost")
         top.addWidget(self.btn_log_refresh)
 
         layout.addLayout(top)
@@ -784,13 +541,14 @@ class MainWindow(QMainWindow):
         self.log_table = QTableWidget()
         self.log_table.setColumnCount(6)
         self.log_table.setHorizontalHeaderLabels(["ID", "시간", "결과", "이벤트", "종소리", "상세"])
-        self.log_table.setSelectionBehavior(self.log_table.SelectionBehavior.SelectRows)
-        self.log_table.setEditTriggers(self.log_table.EditTrigger.NoEditTriggers)
-        self.btn_log_refresh.setObjectName("Ghost")
+        self.log_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.log_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.log_table.setAlternatingRowColors(True)
         self.log_table.horizontalHeader().setStretchLastSection(True)
         self.log_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.log_table.cellDoubleClicked.connect(self.on_log_detail)
+        self.log_table.setColumnHidden(0, True)
+
         layout.addWidget(self.log_table)
 
         self.btn_log_refresh.clicked.connect(self.refresh_logs)
@@ -798,100 +556,47 @@ class MainWindow(QMainWindow):
         self.log_result.currentIndexChanged.connect(self.refresh_logs)
         self.log_limit.valueChanged.connect(self.refresh_logs)
         self.log_keyword.returnPressed.connect(self.refresh_logs)
+
         self.log_from.setDate(QDate.currentDate().addDays(-6))
         self.log_to.setDate(QDate.currentDate())
         self.log_from.setEnabled(False)
         self.log_to.setEnabled(False)
 
-    def refresh_logs(self):
-        mode = self.log_range.currentText()
-        if mode == "직접":
-            self.log_from.setEnabled(True)
-            self.log_to.setEnabled(True)
-        else:
-            self.log_from.setEnabled(False)
-            self.log_to.setEnabled(False)
+    def _build_settings(self):
+        layout = QVBoxLayout(self.tab_settings)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
 
-        start_date, end_date = self._log_dates_from_range()
-        result_value = self.log_result.currentData()
-        keyword = self.log_keyword.text().strip()
-        limit_count = self.log_limit.value()
+        self.chk_startup = QCheckBox("Windows 시작 시 자동 실행")
+        self.chk_startup.setChecked(is_startup_enabled())
+        self.chk_startup.stateChanged.connect(self.on_toggle_startup)
 
-        logs = repo.list_logs(self.conn, start_date, end_date, result_value, keyword, limit_count)
+        layout.addWidget(self.chk_startup)
+        layout.addStretch(1)
 
-        self.log_table.setRowCount(len(logs))
-        for r, l in enumerate(logs):
-            self.log_table.setItem(r, 0, QTableWidgetItem(str(l["id"])))
-            self.log_table.setItem(r, 1, QTableWidgetItem(str(l["occurred_at"])))
-            self.log_table.setItem(r, 2, QTableWidgetItem(str(l["result"])))
-            self.log_table.setItem(r, 3, QTableWidgetItem(str(l["schedule_name"] or "")))
-            self.log_table.setItem(r, 4, QTableWidgetItem(str(l["sound_name"] or "")))
-            self.log_table.setItem(r, 5, QTableWidgetItem(str(l["detail"] or "")))
+    def _build_topbar(self):
+        self.menuBar().hide()
 
-    
-    def _log_dates_from_range(self):
-        today = QDate.currentDate()
-        mode = self.log_range.currentText()
+        tb = QToolBar()
+        tb.setMovable(False)
+        tb.setFloatable(False)
+        tb.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
 
-        if mode == "오늘":
-            d1 = today
-            d2 = today
-            return d1.toString("yyyy-MM-dd"), d2.toString("yyyy-MM-dd")
+        holder = QWidget()
+        lay = QHBoxLayout(holder)
+        lay.setContentsMargins(12, 6, 12, 6)
+        lay.setSpacing(8)
 
-        if mode == "7일":
-            d1 = today.addDays(-6)
-            d2 = today
-            return d1.toString("yyyy-MM-dd"), d2.toString("yyyy-MM-dd")
+        lay.addStretch(1)
 
-        if mode == "30일":
-            d1 = today.addDays(-29)
-            d2 = today
-            return d1.toString("yyyy-MM-dd"), d2.toString("yyyy-MM-dd")
+        btn_exit = QPushButton("프로그램 종료")
+        btn_exit.setObjectName("TopExit")
+        btn_exit.clicked.connect(self.on_exit_app)
+        lay.addWidget(btn_exit)
 
-        if mode == "전체":
-            return "", ""
-
-        self.log_from.setEnabled(True)
-        self.log_to.setEnabled(True)
-        return self.log_from.date().toString("yyyy-MM-dd"), self.log_to.date().toString("yyyy-MM-dd")
-
-    def on_log_detail(self, row, col):
-        id_item = self.log_table.item(row, 0)
-        if not id_item:
-            return
-
-        log_id = id_item.text()
-        log = self.conn.execute(
-            "SELECT * FROM logs WHERE id=?",
-            (log_id,)
-        ).fetchone()
-
-        if not log:
-            return
-
-        text = (
-            f"시간: {log['occurred_at']}\n"
-            f"결과: {log['result']}\n"
-            f"이벤트: {log['schedule_name'] or '-'}\n"
-            f"종소리: {log['sound_name'] or '-'}\n\n"
-            f"상세:\n{log['detail'] or ''}"
-        )
-
-        QMessageBox.information(self, "로그 상세", text)
-
-    def on_ring_next(self):
-        self.scheduler.ring_next_now()
-
-    def on_skip_next(self):
-        self.scheduler.skip_next_once()
-
-    def on_pause(self):
-        self.scheduler.pause()
-
-    def on_resume(self):
-        self.scheduler.paused = False
-        self.scheduler.recompute_next()
-        self.refresh_all()
+        tb.addWidget(holder)
+        self._topbar = tb
 
     def _init_window_icon(self):
         icon_path = asset_path("ui", "app.ico")
@@ -932,6 +637,13 @@ class MainWindow(QMainWindow):
     def _tray_hide(self):
         self.hide()
 
+    def _tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            if self.isVisible():
+                self.hide()
+            else:
+                self._tray_show()
+
     def closeEvent(self, event):
         if getattr(self, "_really_quit", False):
             event.accept()
@@ -949,19 +661,369 @@ class MainWindow(QMainWindow):
             pass
         event.ignore()
 
-    def _tray_activated(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            if self.isVisible():
-                self.hide()
-            else:
-                self._tray_show()
-    
-    def _today_str(self):
-        return datetime.now().strftime("%Y-%m-%d")
-    
-    def on_exit_app(self):
-        from PyQt6.QtWidgets import QMessageBox
+    def _selected_row_id(self, table):
+        row = table.currentRow()
+        if row < 0:
+            return None
+        item = table.item(row, 0)
+        if not item:
+            return None
+        try:
+            return int(item.text())
+        except:
+            return None
 
+    def on_tick(self):
+        self.scheduler.tick()
+
+        now = datetime.now()
+        self.label_now.setText(now.strftime("현재: %Y-%m-%d %H:%M:%S"))
+
+        ev = self.scheduler.next_event
+        if ev:
+            remain = int((ev.run_at - now).total_seconds())
+            self.label_next.setText(
+                f'다음: {ev.run_at.strftime("%Y-%m-%d %H:%M:%S")}  {ev.name}  ({ev.sound_name})  남은시간 {self._format_remaining(remain)}'
+            )
+        else:
+            self.label_next.setText("다음: 없음")
+
+        state = "실행중"
+        if repo.is_pause_today(self.conn, self._today_str()):
+            state = "오늘 자동정지"
+        elif self.scheduler.paused:
+            state = "일시정지"
+        self.label_state.setText(f"상태: {state}")
+
+    def refresh_all(self):
+        self.refresh_logs()
+        self.refresh_sounds()
+        self.refresh_schedules()
+        self.refresh_ops_sounds()
+
+        self.scheduler.recompute_next()
+
+        today = self._today_str()
+        self.chk_pause_today.blockSignals(True)
+        self.chk_pause_today.setChecked(repo.is_pause_today(self.conn, today))
+        self.chk_pause_today.blockSignals(False)
+
+    def refresh_ops_sounds(self):
+        self.ops_sound_combo.clear()
+        sounds = repo.list_sounds(self.conn)
+
+        pick_index = 0
+        for i, s in enumerate(sounds):
+            name = str(s["name"])
+            self.ops_sound_combo.addItem(name, int(s["id"]))
+            if name.lower().startswith("bell"):
+                pick_index = i
+
+        if sounds:
+            self.ops_sound_combo.setCurrentIndex(pick_index)
+
+    def refresh_sounds(self):
+        sounds = repo.list_sounds(self.conn)
+        self.sound_table.setRowCount(len(sounds))
+        for r, s in enumerate(sounds):
+            self.sound_table.setItem(r, 0, QTableWidgetItem(str(s["id"])))
+            self.sound_table.setItem(r, 1, QTableWidgetItem(str(s["name"])))
+            self.sound_table.setItem(r, 2, QTableWidgetItem(str(s["file_name"])))
+            self.sound_table.setItem(r, 3, QTableWidgetItem(self._vol_to_percent_text(s["volume"])))
+
+    def refresh_schedules(self):
+        schedules = repo.list_schedules(self.conn)
+        day_bit = int(self.sch_day_filter.currentData() or 0)
+        if day_bit != 0:
+            schedules = [s for s in schedules if (int(s["weekday_mask"]) & day_bit) != 0]
+
+        self.schedule_table.setRowCount(len(schedules))
+        for r, s in enumerate(schedules):
+            self.schedule_table.setItem(r, 0, QTableWidgetItem(str(s["id"])))
+            self.schedule_table.setItem(r, 1, QTableWidgetItem("ON" if int(s["enabled"]) == 1 else "OFF"))
+            self.schedule_table.setItem(r, 2, QTableWidgetItem(self._mask_to_days(s["weekday_mask"])))
+            self.schedule_table.setItem(r, 3, QTableWidgetItem(str(s["time_hhmm"])))
+            self.schedule_table.setItem(r, 4, QTableWidgetItem(str(s["name"])))
+            self.schedule_table.setItem(r, 5, QTableWidgetItem(str(s["sound_name"])))
+
+            v = s["volume_override"] if s["volume_override"] is not None else s["sound_volume"]
+            self.schedule_table.setItem(r, 6, QTableWidgetItem(self._vol_to_percent_text(v)))
+
+    def on_add_sound(self):
+        dlg = AddSoundDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        name, src_path, vol_percent = dlg.get_value()
+
+        if not src_path:
+            QMessageBox.warning(self, "오류", "종소리 파일을 선택해주세요.")
+            return
+
+        src = Path(src_path)
+        if not src.exists():
+            QMessageBox.warning(self, "오류", "선택한 파일을 찾을 수 없습니다.")
+            return
+
+        if not name:
+            name = src.stem
+
+        try:
+            dst_dir = sounds_dir()
+            file_name = src.name
+            dst = dst_dir / file_name
+
+            if dst.exists():
+                row = self.conn.execute(
+                    "SELECT 1 FROM sounds WHERE file_name=? LIMIT 1",
+                    (file_name,)
+                ).fetchone()
+
+                if row is not None:
+                    QMessageBox.warning(self, "오류", "이미 같은 파일이 등록되어 있습니다.\n(이름이 같아서 중복으로 처리됨)")
+                    return
+
+                try:
+                    self.player.stop()
+                except:
+                    pass
+
+                try:
+                    dst.unlink()
+                except Exception as e:
+                    QMessageBox.warning(self, "오류", f"이전에 남아있는 파일을 지우지 못했습니다.\n{e}")
+                    return
+
+            shutil.copy2(str(src), str(dst))
+            repo.insert_sound(self.conn, name, file_name, float(vol_percent) / 100.0)
+
+            self.scheduler.recompute_next()
+            self.refresh_all()
+
+        except Exception as e:
+            QMessageBox.critical(self, "종소리 추가 실패", str(e))
+
+    def on_edit_sound(self):
+        sound_id = self._selected_row_id(self.sound_table)
+        if not sound_id:
+            return
+
+        s = self.conn.execute("SELECT * FROM sounds WHERE id=?", (int(sound_id),)).fetchone()
+        if not s:
+            return
+
+        dlg = EditSoundDialog(str(s["name"]), float(s["volume"]), self)
+        if dlg.exec() != dlg.DialogCode.Accepted:
+            return
+
+        name, vol = dlg.get_value()
+        if not name:
+            QMessageBox.warning(self, "오류", "이름을 입력해 주세요.")
+            return
+
+        repo.update_sound(self.conn, sound_id, name, vol)
+        self.scheduler.recompute_next()
+        self.refresh_all()
+
+    def on_delete_sound(self):
+        sound_id = self._selected_row_id(self.sound_table)
+        if not sound_id:
+            return
+
+        row = self.sound_table.currentRow()
+        file_name = self.sound_table.item(row, 2).text()
+
+        ok = QMessageBox.question(self, "확인", "삭제할까요?")
+        if ok != QMessageBox.StandardButton.Yes:
+            return
+
+        repo.delete_sound(self.conn, sound_id)
+        self.player.stop()
+
+        p = sound_file_path(file_name)
+        if p.exists():
+            try:
+                p.unlink()
+            except:
+                pass
+
+        repo.clear_transient_overrides(self.conn, self._today_str())
+        self.scheduler.recompute_next()
+        self.refresh_all()
+
+    def on_add_schedule(self):
+        sounds = repo.list_sounds(self.conn)
+        if not sounds:
+            QMessageBox.warning(self, "오류", "종소리를 먼저 추가해 주세요.")
+            return
+
+        dlg = ScheduleDialog(sounds, None, self)
+        if dlg.exec() != dlg.DialogCode.Accepted:
+            return
+
+        name, mask, t, sound_id, v_override, enabled = dlg.get_value()
+        if not name or mask == 0:
+            QMessageBox.warning(self, "오류", "이벤트명과 요일을 설정해 주세요.")
+            return
+
+        repo.insert_schedule(self.conn, name, mask, t, sound_id, v_override, enabled)
+
+        repo.clear_transient_overrides(self.conn, self._today_str())
+        self.scheduler.recompute_next()
+        self.refresh_all()
+
+    def on_edit_schedule(self):
+        schedule_id = self._selected_row_id(self.schedule_table)
+        if not schedule_id:
+            return
+
+        schedules = repo.list_schedules(self.conn)
+        data = None
+        for s in schedules:
+            if int(s["id"]) == int(schedule_id):
+                data = s
+                break
+        if not data:
+            return
+
+        sounds = repo.list_sounds(self.conn)
+        dlg = ScheduleDialog(sounds, data, self)
+        if dlg.exec() != dlg.DialogCode.Accepted:
+            return
+
+        name, mask, t, sound_id, v_override, enabled = dlg.get_value()
+        if not name or mask == 0:
+            QMessageBox.warning(self, "오류", "이벤트명과 요일을 설정해 주세요.")
+            return
+
+        repo.update_schedule(self.conn, schedule_id, name, mask, t, sound_id, v_override, enabled)
+
+        repo.clear_transient_overrides(self.conn, self._today_str())
+        self.scheduler.recompute_next()
+        self.refresh_all()
+
+    def on_delete_schedule(self):
+        schedule_id = self._selected_row_id(self.schedule_table)
+        if not schedule_id:
+            return
+
+        ok = QMessageBox.question(self, "확인", "삭제할까요?")
+        if ok != QMessageBox.StandardButton.Yes:
+            return
+
+        repo.delete_schedule(self.conn, schedule_id)
+
+        repo.clear_transient_overrides(self.conn, self._today_str())
+        self.scheduler.recompute_next()
+        self.refresh_all()
+
+    def on_ring_selected_sound(self):
+        sid = self.ops_sound_combo.currentData()
+        if sid is None:
+            return
+
+        s = self.conn.execute("SELECT * FROM sounds WHERE id=?", (int(sid),)).fetchone()
+        if not s:
+            return
+
+        p = sound_file_path(str(s["file_name"]))
+        try:
+            self.player.play(str(p), float(s["volume"]))
+        except Exception as e:
+            QMessageBox.warning(self, "오류", str(e))
+
+    def on_ring_next(self):
+        self.scheduler.ring_next_now()
+        self.refresh_all()
+
+    def on_skip_next(self):
+        self.scheduler.skip_next_once()
+        self.refresh_all()
+
+    def on_pause(self):
+        self.scheduler.pause()
+        self.refresh_all()
+
+    def on_resume(self):
+        self.scheduler.resume()
+        self.scheduler.recompute_next()
+        self.refresh_all()
+
+    def refresh_logs(self):
+        mode = self.log_range.currentText()
+        if mode == "직접":
+            self.log_from.setEnabled(True)
+            self.log_to.setEnabled(True)
+        else:
+            self.log_from.setEnabled(False)
+            self.log_to.setEnabled(False)
+
+        start_date, end_date = self._log_dates_from_range()
+        result_value = self.log_result.currentData()
+        keyword = self.log_keyword.text().strip()
+        limit_count = self.log_limit.value()
+
+        logs = repo.list_logs(self.conn, start_date, end_date, result_value, keyword, limit_count)
+
+        self.log_table.setRowCount(len(logs))
+        for r, l in enumerate(logs):
+            self.log_table.setItem(r, 0, QTableWidgetItem(str(l["id"])))
+            self.log_table.setItem(r, 1, QTableWidgetItem(str(l["occurred_at"])))
+            self.log_table.setItem(r, 2, QTableWidgetItem(str(l["result"])))
+            self.log_table.setItem(r, 3, QTableWidgetItem(str(l["schedule_name"] or "")))
+            self.log_table.setItem(r, 4, QTableWidgetItem(str(l["sound_name"] or "")))
+            self.log_table.setItem(r, 5, QTableWidgetItem(str(l["detail"] or "")))
+
+    def _log_dates_from_range(self):
+        today = QDate.currentDate()
+        mode = self.log_range.currentText()
+
+        if mode == "오늘":
+            d1 = today
+            d2 = today
+            return d1.toString("yyyy-MM-dd"), d2.toString("yyyy-MM-dd")
+
+        if mode == "7일":
+            d1 = today.addDays(-6)
+            d2 = today
+            return d1.toString("yyyy-MM-dd"), d2.toString("yyyy-MM-dd")
+
+        if mode == "30일":
+            d1 = today.addDays(-29)
+            d2 = today
+            return d1.toString("yyyy-MM-dd"), d2.toString("yyyy-MM-dd")
+
+        if mode == "전체":
+            return "", ""
+
+        return self.log_from.date().toString("yyyy-MM-dd"), self.log_to.date().toString("yyyy-MM-dd")
+
+    def on_log_detail(self, row, col):
+        id_item = self.log_table.item(row, 0)
+        if not id_item:
+            return
+
+        log_id = id_item.text()
+        log = self.conn.execute("SELECT * FROM logs WHERE id=?", (log_id,)).fetchone()
+        if not log:
+            return
+
+        text = (
+            f"시간: {log['occurred_at']}\n"
+            f"결과: {log['result']}\n"
+            f"이벤트: {log['schedule_name'] or '-'}\n"
+            f"종소리: {log['sound_name'] or '-'}\n\n"
+            f"상세:\n{log['detail'] or ''}"
+        )
+        QMessageBox.information(self, "로그 상세", text)
+
+    def on_toggle_startup(self, state):
+        if self.chk_startup.isChecked():
+            enable_startup()
+        else:
+            disable_startup()
+
+    def on_exit_app(self):
         ret = QMessageBox.question(
             self,
             "프로그램 종료",
@@ -985,46 +1047,3 @@ class MainWindow(QMainWindow):
 
         self._really_quit = True
         self.app.quit()
-    
-    def on_toggle_startup(self, state):
-        if self.chk_startup.isChecked():
-            enable_startup()
-        else:
-            disable_startup()
-
-    def _build_settings(self):
-        layout = QVBoxLayout(self.tab_settings)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
-
-        self.chk_startup = QCheckBox("Windows 시작 시 자동 실행")
-        self.chk_startup.setChecked(is_startup_enabled())
-        self.chk_startup.stateChanged.connect(self.on_toggle_startup)
-
-        layout.addWidget(self.chk_startup)
-        layout.addStretch(1)
-
-    def _build_topbar(self):
-        self.menuBar().hide()
-
-        tb = QToolBar()
-        tb.setMovable(False)
-        tb.setFloatable(False)
-        tb.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)
-        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
-
-        holder = QWidget()
-        lay = QHBoxLayout(holder)
-        lay.setContentsMargins(12, 6, 12, 6)
-        lay.setSpacing(8)
-
-        lay.addStretch(1)
-
-        btn_exit = QPushButton("프로그램 종료")
-        btn_exit.setObjectName("TopExit")
-        btn_exit.clicked.connect(self.on_exit_app)
-        lay.addWidget(btn_exit)
-
-        tb.addWidget(holder)
-
-        self._topbar = tb

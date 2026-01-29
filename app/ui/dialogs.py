@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog,
-    QDoubleSpinBox, QCheckBox, QSpinBox, QComboBox, QWidget
+    QCheckBox, QSpinBox, QComboBox, QWidget
 )
 from pathlib import Path
 
@@ -41,11 +41,13 @@ class AddSoundDialog(QDialog):
         root.addWidget(QLabel("파일"))
         root.addLayout(row)
 
-        self.vol_override = QDoubleSpinBox()
-        self.vol_override.setRange(0.0, 1.0)
-        self.vol_override.setSingleStep(0.05)
-        self.vol_override.setSpecialValueText("기본값 사용")
-        self.vol_override.setValue(0.0)
+        self.vol = QSpinBox()
+        self.vol.setRange(0, 200)
+        self.vol.setSingleStep(5)
+        self.vol.setValue(100)
+        self.vol.setSuffix("%")
+        root.addWidget(QLabel("기본 음량"))
+        root.addWidget(self.vol)
 
         actions = QHBoxLayout()
         ok = QPushButton("추가")
@@ -66,7 +68,7 @@ class AddSoundDialog(QDialog):
 
     def get_value(self):
         name = self.name_edit.text().strip()
-        return name, self.selected_path, self.vol.value()
+        return name, self.selected_path, int(self.vol.value())
 
 class ScheduleDialog(QDialog):
     def __init__(self, sounds, data=None, parent=None):
@@ -94,7 +96,6 @@ class ScheduleDialog(QDialog):
         root.addLayout(wrow)
 
         root.addWidget(QLabel("시간"))
-
         trow = QHBoxLayout()
 
         self.hour_spin = QSpinBox()
@@ -110,7 +111,6 @@ class ScheduleDialog(QDialog):
         trow.addWidget(QLabel(":"))
         trow.addWidget(self.min_spin)
         trow.addStretch(1)
-
         root.addLayout(trow)
 
         self.hour_spin.setValue(9)
@@ -122,24 +122,18 @@ class ScheduleDialog(QDialog):
         root.addWidget(QLabel("종소리"))
         root.addWidget(self.sound_combo)
 
-        self.vol_override = QDoubleSpinBox()
-        self.vol_override.setRange(0.0, 1.0)
-        self.vol_override.setSingleStep(0.05)
-        self.vol_override.setValue(1.0)
+        self.vol_override = QSpinBox()
+        self.vol_override.setRange(0, 200)
+        self.vol_override.setSingleStep(5)
         self.vol_override.setSpecialValueText("기본값 사용")
-        self.vol_override.setValue(0.0)
+        self.vol_override.setValue(0)
+        self.vol_override.setSuffix("%")
         root.addWidget(QLabel("이벤트 음량(선택)"))
         root.addWidget(self.vol_override)
 
         self.enabled = QCheckBox("활성")
         self.enabled.setChecked(True)
         root.addWidget(self.enabled)
-
-        self.sort_order = QSpinBox()
-        self.sort_order.setRange(0, 9999)
-        self.sort_order.setValue(0)
-        root.addWidget(QLabel("정렬"))
-        root.addWidget(self.sort_order)
 
         actions = QHBoxLayout()
         ok = QPushButton("저장")
@@ -157,15 +151,16 @@ class ScheduleDialog(QDialog):
             self.hour_spin.setValue(int(hh))
             self.min_spin.setValue(int(mm))
             self.enabled.setChecked(int(data["enabled"]) == 1)
-            self.sort_order.setValue(int(data["sort_order"]))
+
             sid = int(data["sound_id"])
             idx = self.sound_combo.findData(sid)
             if idx >= 0:
                 self.sound_combo.setCurrentIndex(idx)
+
             if data["volume_override"] is None:
-                self.vol_override.setValue(0.0)
+                self.vol_override.setValue(0)
             else:
-                self.vol_override.setValue(float(data["volume_override"]))
+                self.vol_override.setValue(int(float(data["volume_override"]) * 100))
 
     def get_value(self):
         name = self.name_edit.text().strip()
@@ -173,10 +168,11 @@ class ScheduleDialog(QDialog):
         t = f"{int(self.hour_spin.value()):02d}:{int(self.min_spin.value()):02d}"
         sound_id = self.sound_combo.currentData()
         enabled = 1 if self.enabled.isChecked() else 0
-        sort_order = self.sort_order.value()
-        v = self.vol_override.value()
-        volume_override = None if v == 0.0 else v
-        return name, mask, t, sound_id, volume_override, enabled, sort_order
+
+        v = int(self.vol_override.value())
+        volume_override = None if v == 0 else (v / 100.0)
+
+        return name, mask, t, sound_id, volume_override, enabled
 
 class EditSoundDialog(QDialog):
     def __init__(self, name, volume, parent=None):
@@ -194,13 +190,14 @@ class EditSoundDialog(QDialog):
 
         row2 = QHBoxLayout()
         row2.addWidget(QLabel("음량"))
-        self.vol = QDoubleSpinBox()
-        self.vol.setRange(0.0, 1.0)
-        self.vol.setSingleStep(0.05)
+        self.vol = QSpinBox()
+        self.vol.setRange(0, 200)
+        self.vol.setSingleStep(5)
+        self.vol.setSuffix("%")
         try:
-            self.vol.setValue(float(volume))
+            self.vol.setValue(int(float(volume) * 100))
         except:
-            self.vol.setValue(1.0)
+            self.vol.setValue(100)
         row2.addWidget(self.vol)
         layout.addLayout(row2)
 
@@ -215,4 +212,4 @@ class EditSoundDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
 
     def get_value(self):
-        return self.name_edit.text().strip(), float(self.vol.value())
+        return self.name_edit.text().strip(), (int(self.vol.value()) / 100.0)
