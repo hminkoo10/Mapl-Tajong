@@ -91,11 +91,13 @@ class TajongService : Service() {
         handler.post(tick)
     }
 
-    override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
-        when (intent.action) {
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val action = intent?.action ?: ACTION_START
+
+        when (action) {
             ACTION_START -> updateNotification()
             ACTION_PLAY -> {
-                val path = intent.getStringExtra("sound_path") ?: return START_STICKY
+                val path = intent?.getStringExtra("sound_path") ?: return START_STICKY
                 val soundName = intent.getStringExtra("sound_name") ?: "종"
                 val vol = intent.getIntExtra("volume_percent", 100).coerceIn(0, 200)
                 playFile(path, soundName, vol)

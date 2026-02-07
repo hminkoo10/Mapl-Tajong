@@ -32,7 +32,7 @@ object AlarmScheduler {
         val soundName = querySoundName(ctx, next.soundId)
         StatusStore.setNext(ctx, next.runAtMillis, next.title, soundName)
 
-        scheduleAlarmClock(ctx, next.runAtMillis, next.scheduleId)
+        scheduleAlarmClockExact(ctx, next.runAtMillis, next.scheduleId)
 
         ContextCompat.startForegroundService(
             ctx,
@@ -45,10 +45,34 @@ object AlarmScheduler {
         am.cancel(nextPendingIntent(ctx, -1L))
     }
 
-    private fun scheduleAlarmClock(ctx: Context, atMillis: Long, scheduleId: Long) {
+    fun canScheduleExact(ctx: Context): Boolean {
         val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) am.canScheduleExactAlarms() else true
+    }
+
+    fun openExactAlarmSettings(ctx: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+        val i = Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+            data = android.net.Uri.parse("package:${ctx.packageName}")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        ctx.startActivity(i)
+        return true
+    }
+
+    private fun scheduleAlarmClockExact(ctx: Context, atMillis: Long, scheduleId: Long) {
+        val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
         val ringPi = nextPendingIntent(ctx, scheduleId)
         val showPi = showAppPendingIntent(ctx)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
+            ContextCompat.startForegroundService(
+                ctx,
+                Intent(ctx, TajongService::class.java).apply { action = TajongService.ACTION_START }
+            )
+            return
+        }
 
         val info = AlarmManager.AlarmClockInfo(atMillis, showPi)
         am.setAlarmClock(info, ringPi)

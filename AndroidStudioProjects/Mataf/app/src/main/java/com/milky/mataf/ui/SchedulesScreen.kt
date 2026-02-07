@@ -55,6 +55,8 @@ fun SchedulesScreen(soundRepo: SoundRepo) {
     var showEdit by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
+    var showExactDialog by remember { mutableStateOf(false) }
+
     var editId by remember { mutableStateOf<Long?>(null) }
     var editName by remember { mutableStateOf("") }
     var editMask by remember { mutableIntStateOf(0) }
@@ -163,6 +165,28 @@ fun SchedulesScreen(soundRepo: SoundRepo) {
             },
             dismissButton = {
                 OutlinedButton(onClick = { showDeleteConfirm = false }) { Text("취소") }
+            }
+        )
+    }
+
+    if (showExactDialog) {
+        AlertDialog(
+            onDismissRequest = { showExactDialog = false },
+            title = { Text("정확한 알람 권한 필요") },
+            text = {
+                Text(
+                    "정해진 시간에 종을 정확히 울리려면 “정확한 알람” 권한이 필요합니다.\n" +
+                            "설정에서 허용한 뒤 다시 저장해 주세요."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showExactDialog = false
+                    AlarmScheduler.openExactAlarmSettings(ctx)
+                }) { Text("설정으로 이동") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showExactDialog = false }) { Text("취소") }
             }
         )
     }
@@ -367,6 +391,11 @@ fun SchedulesScreen(soundRepo: SoundRepo) {
                     }
                     if (editSoundId <= 0L || soundList.none { it.id == editSoundId }) {
                         warn = "종소리를 선택하세요"
+                        return@Button
+                    }
+
+                    if (!AlarmScheduler.canScheduleExact(ctx)) {
+                        showExactDialog = true
                         return@Button
                     }
 
