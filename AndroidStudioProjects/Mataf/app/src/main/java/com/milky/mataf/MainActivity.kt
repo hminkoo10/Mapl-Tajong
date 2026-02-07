@@ -201,9 +201,15 @@ private fun StatusCard(onFullscreen: () -> Unit) {
             Spacer(Modifier.height(6.dp))
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+
                 Button(onClick = onFullscreen) { Text("전체화면") }
                 OutlinedButton(onClick = { showQuitConfirm = true }) { Text("앱 종료") }
             }
+            Text(
+                "Developed by Hyunmin Koo",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 
