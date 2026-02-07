@@ -1,0 +1,10 @@
+[
+  { "file": "bell1.wav", "name": "Bell 1", "volume": 100 },
+  { "file": "bell2.wav", "name": "Bell 2", "volume": 100 },
+  { "file": "bell3.wav", "name": "Bell 3", "volume": 100 },
+  { "file": "bell4.wav", "name": "Bell 4", "volume": 100 },
+  { "file": "bell5.wav", "name": "Bell 5", "volume": 100 },
+  { "file": "bell6.wav", "name": "Bell 6", "volume": 100 },
+  { "file": "bell7.wav", "name": "Bell 7", "volume": 100 },
+  { "file": "bell8.wav", "name": "Bell 8", "volume": 100 }
+]
