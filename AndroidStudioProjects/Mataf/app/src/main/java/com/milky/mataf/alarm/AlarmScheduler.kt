@@ -5,7 +5,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import androidx.core.content.ContextCompat
 import com.milky.mataf.MainActivity
 import com.milky.mataf.data.AppDbHelper
 import com.milky.mataf.data.ScheduleRepo
@@ -22,10 +21,6 @@ object AlarmScheduler {
         if (next == null) {
             cancelNext(ctx)
             StatusStore.clear(ctx)
-            ContextCompat.startForegroundService(
-                ctx,
-                Intent(ctx, TajongService::class.java).apply { action = TajongService.ACTION_START }
-            )
             return
         }
 
@@ -33,11 +28,6 @@ object AlarmScheduler {
         StatusStore.setNext(ctx, next.runAtMillis, next.title, soundName)
 
         scheduleAlarmClockExact(ctx, next.runAtMillis, next.scheduleId)
-
-        ContextCompat.startForegroundService(
-            ctx,
-            Intent(ctx, TajongService::class.java).apply { action = TajongService.ACTION_START }
-        )
     }
 
     fun cancelNext(ctx: Context) {
@@ -67,10 +57,6 @@ object AlarmScheduler {
         val showPi = showAppPendingIntent(ctx)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
-            ContextCompat.startForegroundService(
-                ctx,
-                Intent(ctx, TajongService::class.java).apply { action = TajongService.ACTION_START }
-            )
             return
         }
 
@@ -97,11 +83,10 @@ object AlarmScheduler {
 
     private fun querySoundName(ctx: Context, soundId: Long): String {
         val db = AppDbHelper.get(ctx).readableDatabase
-        val c = db.rawQuery(
+        db.rawQuery(
             "SELECT name FROM sounds WHERE id=? LIMIT 1",
             arrayOf(soundId.toString())
-        )
-        c.use {
+        ).use {
             if (it.moveToFirst()) return it.getString(0) ?: ""
         }
         return ""
