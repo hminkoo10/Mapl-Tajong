@@ -89,10 +89,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // 미리 듣기(스트리밍)
-    implementation("androidx.media3:media3-exoplayer:1.5.1")
-    implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
-
     // YouTube·SoundCloud 검색과 소리 주소 (NewPipe 앱이 쓰는 라이브러리)
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
 

@@ -125,6 +125,7 @@ private fun FullscreenClock(onClose: () -> Unit) {
         val clockDp = if (landscape) minOf(maxWidth * 0.12f, maxHeight * 0.26f) else minOf(maxWidth * 0.19f, maxHeight * 0.12f)
         val ringDp = if (landscape) minOf(maxHeight * 0.44f, maxWidth * 0.27f) else minOf(maxWidth * 0.62f, maxHeight * 0.32f)
         val pad = if (landscape) 48.dp else 24.dp
+        val stripH = if (landscape) (maxHeight * 0.16f).coerceIn(84.dp, 140.dp) else 92.dp
 
         Column(Modifier.fillMaxSize().padding(horizontal = pad, vertical = if (landscape) 28.dp else 36.dp)) {
             // 위: 날짜 · 버튼
@@ -177,7 +178,7 @@ private fun FullscreenClock(onClose: () -> Unit) {
             Spacer(Modifier.weight(1f))
 
             Upcoming(events.filter { it.status in setOf("next", "upcoming", "will_skip", "paused") }
-                .take(if (landscape) 5 else 3), th, if (landscape) (maxHeight * 0.16f).coerceIn(84.dp, 140.dp) else 92.dp)
+                .take(if (landscape) 5 else 3), th, stripH)
         }
     }
 }

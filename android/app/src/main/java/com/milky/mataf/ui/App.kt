@@ -52,7 +52,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.milky.mataf.R
+import com.milky.mataf.core.Sounds
 import com.milky.mataf.data.Sound
+import com.milky.mataf.ui.screens.SearchScreen
+import java.io.File
 import com.milky.mataf.ui.components.ToastHost
 import com.milky.mataf.ui.components.isWide
 import com.milky.mataf.ui.screens.HomeScreen
@@ -71,10 +74,13 @@ enum class Tab(val label: String, val icon: ImageVector) {
     Settings("설정", Icons.Rounded.Settings),
 }
 
+/** 다듬을 소리: 새로 받은 임시 파일(soundId=null) 또는 이미 있는 종소리 */
+data class EditTarget(val file: File, val name: String, val soundId: Long?, val volume: Double = 1.0, val temp: Boolean = false)
+
 /** 종소리 화면 위에 덮어 여는 화면 (찾아서 받기 / 자르기·다듬기) */
 sealed interface Sub {
     data object Search : Sub
-    data class Edit(val sound: Sound) : Sub
+    data class Edit(val target: EditTarget) : Sub
 }
 
 @Composable
@@ -97,7 +103,7 @@ fun App() {
                     label = "page") { page ->
                     when (page) {
                         is Tab -> holder.SaveableStateProvider(page.name) { TabPage(page) { sub = it } }
-                        is Sub.Search -> Soon { sub = null }
+                        is Sub.Search -> SearchScreen(onClose = { sub = null }, onEdit = { sub = Sub.Edit(it) })
                         is Sub.Edit -> Soon { sub = null }
                         else -> {}
                     }
@@ -121,10 +127,11 @@ fun App() {
 
 @Composable
 private fun TabPage(tab: Tab, open: (Sub) -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     when (tab) {
         Tab.Home -> HomeScreen()
         Tab.Schedules -> SchedulesScreen()
-        Tab.Sounds -> SoundsScreen(onSearch = { open(Sub.Search) }, onEdit = { open(Sub.Edit(it)) })
+        Tab.Sounds -> SoundsScreen(onSearch = { open(Sub.Search) }, onEdit = { open(Sub.Edit(it.toTarget(ctx))) })
         Tab.Logs -> LogsScreen()
         Tab.Settings -> SettingsScreen()
     }
@@ -183,3 +190,5 @@ private fun Sidebar(tab: Tab, onSelect: (Tab) -> Unit) {
         }
     }
 }
+
+private fun Sound.toTarget(ctx: android.content.Context) = EditTarget(Sounds.file(ctx, fileName), name, id, volume)
