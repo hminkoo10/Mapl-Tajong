@@ -32,13 +32,3 @@
 설치한 프로그램은 6시간마다 GitHub Releases를 확인해요. 새 버전이 있으면 미리 받아 두고(SHA-256 확인),
 **다음 종까지 10분 넘게 남았고 소리가 나지 않을 때** 조용히 설치한 뒤 다시 켜져요.
 설정 → 업데이트에서 끄거나 바로 설치할 수 있어요.
-
-## 직접 빌드하기
-```
-pip install -r requirements.txt
-python -m app.main          # 바로 실행
-build_exe.bat               # 설치 파일 만들기 (Inno Setup 6.3 이상 필요)
-```
-결과: `dist\installer\MaplTajong-Setup-x.y.z.exe`
-
-글꼴: [Pretendard](https://github.com/orioncactus/pretendard) (SIL Open Font License 1.1, `app/assets/fonts/Pretendard-LICENSE.txt`)
