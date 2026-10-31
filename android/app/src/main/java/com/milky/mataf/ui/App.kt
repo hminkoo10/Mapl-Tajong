@@ -55,6 +55,7 @@ import com.milky.mataf.R
 import com.milky.mataf.core.Sounds
 import com.milky.mataf.data.Sound
 import com.milky.mataf.ui.screens.SearchScreen
+import com.milky.mataf.ui.screens.SoundEditorScreen
 import java.io.File
 import com.milky.mataf.ui.components.ToastHost
 import com.milky.mataf.ui.components.isWide
@@ -104,7 +105,7 @@ fun App() {
                     when (page) {
                         is Tab -> holder.SaveableStateProvider(page.name) { TabPage(page) { sub = it } }
                         is Sub.Search -> SearchScreen(onClose = { sub = null }, onEdit = { sub = Sub.Edit(it) })
-                        is Sub.Edit -> Soon { sub = null }
+                        is Sub.Edit -> SoundEditorScreen(page.target) { sub = null }
                         else -> {}
                     }
                 }
@@ -138,17 +139,6 @@ private fun TabPage(tab: Tab, open: (Sub) -> Unit) {
 }
 
 @Composable
-private fun Soon(onClose: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("곧 추가돼요", style = text(18, FontWeight.Bold))
-        Spacer(Modifier.height(12.dp))
-        Text("돌아가기", style = text(15, FontWeight.SemiBold, C.accentText),
-            modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onClose).padding(12.dp))
-    }
-}
-
-@Composable
 private fun BottomBar(tab: Tab, onSelect: (Tab) -> Unit) {
     Column(Modifier.fillMaxWidth().background(Color.White).navigationBarsPadding()) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(C.grey100))
@@ -172,7 +162,8 @@ private fun Sidebar(tab: Tab, onSelect: (Tab) -> Unit) {
     Column(Modifier.width(232.dp).fillMaxHeight().background(Color.White).navigationBarsPadding().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.padding(start = 8.dp, top = 8.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(androidx.compose.ui.res.painterResource(R.drawable.ic_bell), null, tint = C.accent, modifier = Modifier.size(26.dp))
+            androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.app_icon), null,
+                modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)))
             Spacer(Modifier.width(10.dp))
             Text("마고 타종", style = text(19, FontWeight.ExtraBold))
         }

@@ -112,6 +112,8 @@ class BellPlayer(private val ctx: Context) {
 
     val isPlaying: Boolean get() = try { mp?.isPlaying == true } catch (e: Exception) { false }
 
+    val positionMs: Int get() = try { mp?.currentPosition ?: 0 } catch (e: Exception) { 0 }
+
     fun play(path: String, volume: Double, label: String, onDone: (() -> Unit)? = null, onError: ((String) -> Unit)? = null) {
         stop()
         this.label = label
@@ -173,4 +175,6 @@ object Preview {
         player?.stop()
         _playing.value = null
     }
+
+    fun positionMs(): Int = player?.positionMs ?: 0
 }

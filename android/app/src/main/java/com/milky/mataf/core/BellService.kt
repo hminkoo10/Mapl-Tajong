@@ -174,7 +174,7 @@ class BellService : Service() {
         val stop = PendingIntent.getService(this, 1, Intent(this, BellService::class.java).putExtra(KIND, K_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n: Notification = NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_bell)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("마고 타종")
             .setContentText(text)
             .setContentIntent(open)
