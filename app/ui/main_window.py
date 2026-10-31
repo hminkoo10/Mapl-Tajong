@@ -8,7 +8,7 @@ from app.core.paths import asset_path
 from app.core.player import SoundPlayer
 from app.core.scheduler import Scheduler
 from app.core.timeutil import ampm
-from app.core.version import APP_TITLE, APP_VERSION, DEVELOPER
+from app.core.version import APP_TITLE, APP_VERSION
 from app.ui import icons
 from app.ui.context import AppContext
 from app.core.updater import notes_to_text
@@ -39,7 +39,7 @@ class MainWindow(QMainWindow):
         self._fullscreen = None
         self._really_quit = False
 
-        self.setWindowTitle(f"{APP_TITLE} {APP_VERSION} - {DEVELOPER} 개발")
+        self.setWindowTitle(f"{APP_TITLE} {APP_VERSION}")
 
         central = QWidget()
         self.setCentralWidget(central)

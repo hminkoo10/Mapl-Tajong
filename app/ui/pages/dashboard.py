@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollAre
 
 from app.core.paths import sound_file_path
 from app.core.timeutil import ampm, ampm_parts, format_remaining
+from app.core.version import DEVELOPER
 from app.data import repo
 from app.ui.select import Select
 from app.ui.theme import C, font, qc
@@ -313,6 +314,9 @@ class DashboardPage(QWidget):
         self.manual.body.addLayout(mb)
         left.addWidget(self.manual)
         left.addStretch(1)
+        credit = QLabel(f"{DEVELOPER} 개발")
+        credit.setStyleSheet(f"color: {C.grey400}; font-size: 12px; padding-left: 4px;")
+        left.addWidget(credit, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
         cols.addLayout(left, 3)
 
         # ---------------- 오늘 ----------------
