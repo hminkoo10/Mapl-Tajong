@@ -21,7 +21,7 @@ class SoundPlayer:
         self.current_path = None
         self.current_name = ""
         self.started_at = 0.0
-        self._init_mixer()
+        self._last_active = time.monotonic()
 
     def _init_mixer(self):
         if self._ok:
@@ -29,9 +29,33 @@ class SoundPlayer:
         try:
             pygame.mixer.init()
             self._ok = True
+            self._last_active = time.monotonic()
         except Exception:
             self._ok = False
         return self._ok
+
+    IDLE_RELEASE_SEC = 20
+    PREWARM_SEC = 15
+
+    def idle_tick(self, next_bell_in=None):
+        """1초마다 호출. 소리 장치는 쓸 때만 켜 둔다 (켜 두기만 해도 CPU를 계속 쓴다).
+        다음 종이 가까우면 미리 켜서 정시에 바로 울리게 한다."""
+        soon = next_bell_in is not None and next_bell_in <= self.PREWARM_SEC
+        if soon:
+            self._init_mixer()
+            self._last_active = time.monotonic()
+            return
+        if not self._ok:
+            return
+        if self.is_playing():
+            return
+        if time.monotonic() - self._last_active >= self.IDLE_RELEASE_SEC:
+            self.stop()
+            try:
+                pygame.mixer.quit()
+            except Exception:
+                pass
+            self._ok = False
 
     # ---- 증폭(100% 초과 음량) ----
     def _amp_key(self, path, gain):
@@ -102,6 +126,7 @@ class SoundPlayer:
         pygame.mixer.music.load(src)
         pygame.mixer.music.set_volume(mixer_vol)
         pygame.mixer.music.play()
+        self._last_active = time.monotonic()
         self.current_path = str(p)
         self.current_name = name or p.stem
         self.started_at = time.monotonic()
@@ -110,9 +135,12 @@ class SoundPlayer:
         if not self._ok:
             return False
         try:
-            return bool(pygame.mixer.music.get_busy())
+            busy = bool(pygame.mixer.music.get_busy())
         except Exception:
             return False
+        if busy:
+            self._last_active = time.monotonic()
+        return busy
 
     def elapsed(self):
         return time.monotonic() - self.started_at if self.is_playing() else 0.0

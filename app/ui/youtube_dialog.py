@@ -1,8 +1,10 @@
-"""YouTube에서 종소리 검색 → 오디오만 다운로드 → (편집 후) 종소리로 등록."""
+"""YouTube에서 종소리 검색 → 미리 듣기 → 오디오만 다운로드 → (다듬은 뒤) 종소리로 등록."""
+import threading
+import time
 from pathlib import Path
 
-from PyQt6.QtCore import QRectF, Qt, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices, QFont, QFontMetricsF, QPainter, QPainterPath, QPixmap
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QScrollArea, QSizePolicy,
                              QVBoxLayout, QWidget)
 
@@ -12,10 +14,11 @@ from app.ui import icons
 from app.ui.dialogs import BaseDialog
 from app.ui.sound_editor import SoundEditorDialog
 from app.ui.theme import C, font, mix, qc
-from app.ui.widgets import Button, ChipButton, Spinner, _anim, ease_out_cubic
+from app.ui.widgets import Button, ChipButton, Spinner, TickingWidget, _anim, ease_out_cubic, ticker
 from app.ui.workers import DownloadThread, ThumbThread, keep_alive, run_async
 
 SUGGESTIONS = ["학교 종소리", "수업 시작종", "차임벨 효과음", "띵동댕동", "쉬는 시간 종", "알림음 효과음"]
+PREVIEW_SEC = 30
 
 
 def _dur(sec):
@@ -27,15 +30,21 @@ def _dur(sec):
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
-class ResultCard(QWidget):
+class ResultCard(TickingWidget):
     clicked = pyqtSignal(object)
     doubleClicked = pyqtSignal(object)
+    previewClicked = pyqtSignal(object)
+    always_tick = False
 
     def __init__(self, data, delay=0.0, parent=None):
         super().__init__(parent)
         self.data = data
         self.thumb = None
         self.selected = False
+        self.preview = "idle"   # idle | loading | playing
+        self.play_t0 = 0.0
+        self._thumb_hover = False
+        self.setMouseTracking(True)
         self._hover = 0.0
         self._k = 0.0
         self._ha = None
@@ -62,16 +71,42 @@ class ResultCard(QWidget):
         self.selected = on
         self.update()
 
+    def set_preview(self, state):
+        self.preview = state
+        if state == "playing":
+            self.play_t0 = time.monotonic()
+        if state in ("loading", "playing"):
+            self.start_ticking()
+        else:
+            self.stop_ticking()
+        self.update()
+
+    def on_frame(self, t):
+        self.update()
+
+    def _thumb_rect(self):
+        r = QRectF(self.rect()).adjusted(0, 2, 0, -2)
+        return QRectF(r.left() + 8, r.top() + 8, 124, r.height() - 16)
+
     def enterEvent(self, e):
         self._ha = _anim(self, self._hover, 1.0, 160, self._set_h)
         self._ha.start()
 
+    def mouseMoveEvent(self, e):
+        h = self._thumb_rect().contains(e.position())
+        if h != self._thumb_hover:
+            self._thumb_hover = h
+            self.update()
+
     def leaveEvent(self, e):
+        self._thumb_hover = False
         self._ha = _anim(self, self._hover, 0.0, 220, self._set_h)
         self._ha.start()
 
     def mousePressEvent(self, e):
         self.clicked.emit(self)
+        if self._thumb_rect().contains(e.position()):
+            self.previewClicked.emit(self)
 
     def mouseDoubleClickEvent(self, e):
         self.doubleClicked.emit(self)
@@ -88,7 +123,7 @@ class ResultCard(QWidget):
         p.setBrush(qc(C.accent_softer) if self.selected else mix("#00FFFFFF", C.grey50, self._hover))
         p.drawRoundedRect(r, 14, 14)
 
-        th = QRectF(r.left() + 8, r.top() + 8, 124, r.height() - 16)
+        th = self._thumb_rect()
         path = QPainterPath()
         path.addRoundedRect(th, 9, 9)
         p.save()
@@ -102,6 +137,28 @@ class ResultCard(QWidget):
         else:
             p.fillRect(th, qc(C.neutral_soft))
             p.drawPixmap(int(th.center().x() - 14), int(th.center().y() - 14), icons.pixmap("youtube", "#E0574B", 28))
+        # 미리 듣기 버튼 (마우스를 올렸거나, 준비 중·재생 중일 때)
+        if self.preview != "idle" or self._thumb_hover or self._hover > 0.5:
+            p.fillRect(th, qc("#000000", 0.35 if self.preview != "idle" or self._thumb_hover else 0.18))
+            c = th.center()
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(qc("#FFFFFF", 0.95))
+            p.drawEllipse(c, 17, 17)
+            t = ticker().now()
+            if self.preview == "loading":
+                p.setPen(QPen(qc(C.accent), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawArc(QRectF(c.x() - 9, c.y() - 9, 18, 18), int((-t * 360) % 360 * 16), 100 * 16)
+            elif self.preview == "playing":
+                k = min(1.0, (time.monotonic() - self.play_t0) / PREVIEW_SEC)
+                p.setPen(QPen(qc(C.accent), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawArc(QRectF(c.x() - 15, c.y() - 15, 30, 30), 90 * 16, int(-k * 360 * 16))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(qc(C.grey900))
+                p.drawRoundedRect(QRectF(c.x() - 5, c.y() - 5, 10, 10), 2, 2)
+            else:
+                p.drawPixmap(QPointF(c.x() - 7, c.y() - 8), icons.pixmap("play", C.grey900, 16))
         p.restore()
         d = _dur(self.data.get("duration"))
         p.setFont(font(11, QFont.Weight.Bold))
@@ -143,6 +200,12 @@ class YoutubeDialog(BaseDialog):
         self._thumbs = None
         self._dl = None
         self._search_seq = 0
+        self._pv_card = None
+        self._pv_cancel = None
+        self._pv_seq = 0
+        self._pv_timer = QTimer(self)
+        self._pv_timer.setInterval(300)
+        self._pv_timer.timeout.connect(self._watch_preview)
 
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -201,9 +264,9 @@ class YoutubeDialog(BaseDialog):
         note.setStyleSheet(f"color: {C.grey400}; font-size: 12.5px;")
         self.body.addWidget(note)
 
-        self.btn_open = Button("미리 듣기", variant="subtle", size="lg")
-        self.btn_open.setToolTip("받기 전에 브라우저에서 들어볼 수 있어요")
-        self.btn_open.clicked.connect(self._open_in_browser)
+        self.btn_open = Button("미리 듣기", icon_name="play", variant="secondary", size="lg")
+        self.btn_open.setToolTip(f"받기 전에 앞부분 {PREVIEW_SEC}초를 들어볼 수 있어요")
+        self.btn_open.clicked.connect(lambda: self.toggle_preview(self.selected))
         self.footer_left.addWidget(self.btn_open)
         self.btn_direct = Button("바로 추가", variant="secondary", size="lg")
         self.btn_direct.clicked.connect(lambda: self.download(edit=False))
@@ -233,6 +296,7 @@ class YoutubeDialog(BaseDialog):
             b.setEnabled(on and not busy)
 
     def _clear(self):
+        self.stop_preview()
         if self._thumbs:
             self._thumbs.stop()
             self._thumbs = None
@@ -292,6 +356,7 @@ class YoutubeDialog(BaseDialog):
         for i, r in enumerate(results):
             c = ResultCard(r, delay=i * 0.045)
             c.clicked.connect(self._select)
+            c.previewClicked.connect(self.toggle_preview)
             c.doubleClicked.connect(lambda card: (self._select(card), self.download(edit=True)))
             self.cards.append(c)
             self.list_lay.insertWidget(self.list_lay.count() - 1, c)
@@ -315,10 +380,83 @@ class YoutubeDialog(BaseDialog):
         for c in self.cards:
             c.set_selected(c is card)
         self._set_actions_enabled(True)
+        self._sync_preview_button()
 
-    def _open_in_browser(self):
-        if self.selected:
-            QDesktopServices.openUrl(QUrl(self.selected.data["url"]))
+    # ---------------- 미리 듣기 ----------------
+    def _sync_preview_button(self):
+        active = self._pv_card is not None and self._pv_card is self.selected
+        self.btn_open.setText("그만 듣기" if active else "미리 듣기")
+        self.btn_open.set_icon_name("stop" if active else "play")
+        self.btn_open.updateGeometry()
+
+    def toggle_preview(self, card):
+        if card is None:
+            return
+        if self._pv_card is card:
+            self.stop_preview()
+            return
+        self.stop_preview()
+        if card.data.get("live"):
+            self._set_state("실시간 방송은 미리 들을 수 없어요", error=True)
+            return
+        self._pv_seq += 1
+        seq = self._pv_seq
+        self._pv_card = card
+        self._pv_cancel = threading.Event()
+        card.set_preview("loading")
+        self._set_state("미리 듣기를 준비하고 있어요", busy=True)
+        self._sync_preview_button()
+        run_async(youtube.preview_clip, card.data["url"], PREVIEW_SEC, self._pv_cancel,
+                  on_done=lambda path: self._preview_ready(seq, card, path),
+                  on_fail=lambda msg: self._preview_failed(seq, card, msg))
+
+    def _preview_ready(self, seq, card, path):
+        try:
+            if seq != self._pv_seq or self._pv_card is not card:
+                return
+            self.ctx.player.play(str(path), 1.0, "미리 듣기")
+            card.set_preview("playing")
+            self._set_state(f"앞부분 {PREVIEW_SEC}초를 들려드리고 있어요")
+            self._pv_timer.start()
+        except RuntimeError:
+            pass
+        except Exception as e:
+            self._preview_failed(seq, card, str(e))
+
+    def _preview_failed(self, seq, card, msg):
+        try:
+            if seq != self._pv_seq:
+                return
+            card.set_preview("idle")
+            self._pv_card = None
+            self._sync_preview_button()
+            self._set_state(msg, error=True)
+        except RuntimeError:
+            pass
+
+    def _watch_preview(self):
+        if self._pv_card is not None and not self.ctx.player.is_playing():
+            self.stop_preview(stop_player=False)
+            self._set_state("")
+
+    def stop_preview(self, stop_player=True):
+        self._pv_seq += 1
+        self._pv_timer.stop()
+        if self._pv_cancel is not None:
+            self._pv_cancel.set()
+            self._pv_cancel = None
+        if self._pv_card is not None:
+            try:
+                self._pv_card.set_preview("idle")
+            except RuntimeError:
+                pass
+            if stop_player and self.ctx.player.current_name == "미리 듣기":
+                self.ctx.player.stop()
+            self._pv_card = None
+        try:
+            self._sync_preview_button()
+        except RuntimeError:
+            pass
 
     # ---------------- 다운로드 ----------------
     def _try_accept(self):
@@ -327,6 +465,7 @@ class YoutubeDialog(BaseDialog):
     def download(self, edit=True):
         if not self.selected or self._dl is not None:
             return
+        self.stop_preview()
         data = self.selected.data
         self._dl = DownloadThread(data["url"], download_tmp_dir())
         self._dl_edit = edit
@@ -402,6 +541,7 @@ class YoutubeDialog(BaseDialog):
         self.accept()
 
     def reject(self):
+        self.stop_preview()
         if self._dl is not None:
             self._dl.cancel()
         if self._thumbs:

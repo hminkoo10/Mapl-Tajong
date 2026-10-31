@@ -1,9 +1,8 @@
 """교실 모니터·TV용 전체화면 시계."""
-import math
 import time
 from datetime import datetime
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
+from PyQt6.QtCore import QDateTime, QPointF, QRectF, Qt, QTimer
 from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QRadialGradient
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
@@ -120,9 +119,10 @@ class FullscreenClock(TickingWidget):
         root.addWidget(self.strip)
 
         self._timer = QTimer(self)
-        self._timer.setInterval(200)
-        self._timer.timeout.connect(self.refresh)
-        self._timer.start()
+        self._timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._on_second)
+        self._timer.start(0)
         self._ev_timer = QTimer(self)
         self._ev_timer.setInterval(3000)
         self._ev_timer.timeout.connect(self._refresh_events)
@@ -160,6 +160,10 @@ class FullscreenClock(TickingWidget):
         self._events = evs
         self.strip.set_items([e for e in evs if e["status"] in ("next", "upcoming", "will_skip", "paused")])
 
+    def _on_second(self):
+        self.refresh()
+        self._timer.start(1000 - QDateTime.currentDateTime().time().msec() + 5)
+
     def refresh(self):
         now = datetime.now()
         self.clock.setText(now.strftime("%H:%M:%S"))
@@ -195,6 +199,7 @@ class FullscreenClock(TickingWidget):
         try:
             self.ring.burst()
             self._flash = ticker().now()
+            self.start_ticking()
             self._refresh_events()
         except RuntimeError:
             pass
@@ -224,7 +229,12 @@ class FullscreenClock(TickingWidget):
 
     # ---------- 그리기 ----------
     def on_frame(self, t):
-        if t - self._last_paint >= 1 / 30:
+        # 열릴 때의 페이드와 종이 울릴 때의 반짝임 동안만 다시 그린다
+        busy = time.monotonic() - self._opening < 0.6 or self._flash is not None
+        if not busy:
+            self.stop_ticking()
+            return
+        if t - self._last_paint >= 1 / 60:
             self._last_paint = t
             self.update()
 
@@ -235,8 +245,7 @@ class FullscreenClock(TickingWidget):
         t = ticker().now()
         p.fillRect(r, QColor("#121316"))
         # 아래쪽에서 은은하게 번지는 주황빛 (아주 천천히 숨쉬듯)
-        breathe = 0.9 + 0.1 * math.sin(t * 0.4)
-        rg = QRadialGradient(QPointF(r.center().x(), r.bottom() + r.height() * 0.25), r.width() * 0.75 * breathe)
+        rg = QRadialGradient(QPointF(r.center().x(), r.bottom() + r.height() * 0.25), r.width() * 0.75)
         rg.setColorAt(0.0, qc("#F76B15", 0.30))
         rg.setColorAt(0.5, qc("#F76B15", 0.10))
         rg.setColorAt(1.0, qc("#F76B15", 0.0))

@@ -1,10 +1,11 @@
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QDialog, QHBoxLayout, QHeaderView, QLabel, QMenu, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QDialog, QHBoxLayout, QHeaderView, QLabel, QVBoxLayout, QWidget
 
 from app.core import sound_files
 from app.core.paths import sound_file_path
 from app.data import repo
 from app.ui.dialogs import SoundInfoDialog, confirm, notify
+from app.ui.select import Menu
 from app.ui.sound_editor import open_editor_for_sound
 from app.ui.tables import PillDelegate, SmartTable, TextDelegate
 from app.ui.theme import C
@@ -75,8 +76,15 @@ class SoundsPage(QWidget):
         self._eq_timer = QTimer(self)
         self._eq_timer.setInterval(250)
         self._eq_timer.timeout.connect(lambda: self.eq.set_active(self.ctx.player.is_playing()))
-        self._eq_timer.start()
         self.refresh()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._eq_timer.start()
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self._eq_timer.stop()
 
     def refresh(self):
         keep = self.table.selected_ids()
@@ -199,7 +207,7 @@ class SoundsPage(QWidget):
         r = self.table.rowAt(pos.y())
         if r >= 0:
             self.table.selectRow(r)
-        m = QMenu(self)
+        m = Menu(self)
         if r >= 0:
             m.addAction("들어보기", self.on_play)
             m.addAction("자르기·다듬기", self.on_editor)

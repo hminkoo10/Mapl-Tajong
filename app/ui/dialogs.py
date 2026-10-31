@@ -3,10 +3,11 @@ from pathlib import Path
 
 from PyQt6.QtCore import QPoint, QRectF, Qt, QTime, QTimer, QVariantAnimation
 from PyQt6.QtGui import QPainter
-from PyQt6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+from PyQt6.QtWidgets import (QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                              QMainWindow, QScrollArea, QSlider, QSpinBox, QTimeEdit, QVBoxLayout, QWidget)
 
 from app.core.timeutil import mask_to_days
+from app.ui.select import Select
 from app.ui.theme import C, paint_soft_shadow, qc
 from app.ui.widgets import (Button, DayChips, IconButton, SegmentedControl, SlideBar, ToggleSwitch, _anim, field_label,
                             hline, muted_label)
@@ -245,7 +246,7 @@ class VolumeField(QWidget):
 
 
 def _sound_combo(sounds, current=None):
-    cb = QComboBox()
+    cb = Select()
     for s in sounds:
         cb.addItem(str(s["name"]), int(s["id"]))
     if current is not None:
@@ -467,7 +468,7 @@ class BatchEditDialog(BaseDialog):
         nl.addWidget(self.repl_edit, 0, 2)
         self.sec_name = _Section("이름", "이름 일부를 찾아 바꿔요", nl, self._update_summary)
 
-        self.set_combo = QComboBox()
+        self.set_combo = Select()
         for s in sets:
             self.set_combo.addItem(str(s["name"]), int(s["id"]))
         i = self.set_combo.findData(int(current_set_id))
@@ -545,7 +546,7 @@ class DuplicateDialog(BaseDialog):
     def __init__(self, count, sets, current_set_id, parent=None):
         super().__init__(f"일정 {count}개 복제", "", None, parent, 440)
         self.btn_ok.setText("복제")
-        self.set_combo = QComboBox()
+        self.set_combo = Select()
         for s in sets:
             self.set_combo.addItem(str(s["name"]), int(s["id"]))
         i = self.set_combo.findData(int(current_set_id))

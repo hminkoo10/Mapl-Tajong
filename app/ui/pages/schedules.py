@@ -1,11 +1,12 @@
 from PyQt6.QtCore import QEvent, QRectF, Qt
 from PyQt6.QtGui import QFont, QPainter
-from PyQt6.QtWidgets import QComboBox, QDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QVBoxLayout, QWidget
 
 from app.core.timeutil import WEEKDAYS, mask_to_days
 from app.data import repo
 from app.ui import icons
 from app.ui.dialogs import BatchEditDialog, DuplicateDialog, ScheduleDialog, ask_text, confirm, notify
+from app.ui.select import Menu, Select
 from app.ui.tables import PillDelegate, SmartTable, TextDelegate
 from app.ui.theme import C, font, qc
 from app.ui.widgets import Button, PageHeader, SegmentedControl, _anim, ease_out_cubic, page_field
@@ -118,7 +119,7 @@ class SchedulesPage(QWidget):
         root.setSpacing(16)
 
         header = PageHeader("시간표", "세트마다 종 치는 시간을 정해요.")
-        self.set_combo = page_field(QComboBox())
+        self.set_combo = page_field(Select())
         self.set_combo.setMinimumWidth(170)
         header.right.addWidget(self.set_combo)
         self.btn_set_menu = Button("세트 관리", variant="white")
@@ -360,7 +361,7 @@ class SchedulesPage(QWidget):
         if row >= 0 and row not in self.table.selected_rows():
             self.table.selectRow(row)
         n = len(self.table.selected_ids())
-        m = QMenu(self)
+        m = Menu(self)
         m.addAction("일정 추가", self.on_add)
         if n:
             m.addSeparator()
@@ -377,7 +378,7 @@ class SchedulesPage(QWidget):
 
     # ---------------- 세트 ----------------
     def _show_set_menu(self):
-        m = QMenu(self)
+        m = Menu(self)
         m.addAction("새 세트 만들기", self.on_add_set)
         m.addAction("지금 세트 복제", self.on_duplicate_set)
         m.addAction("이름 바꾸기", self.on_rename_set)

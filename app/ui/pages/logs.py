@@ -1,10 +1,11 @@
 from PyQt6.QtCore import QDate
-from PyQt6.QtWidgets import QComboBox, QDateEdit, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QSpinBox, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QDateEdit, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QSpinBox, QVBoxLayout, QWidget
 
 from app.core.backup import RESULT_LABELS, export_logs_csv
 from app.data import repo
 from app.ui import icons
 from app.ui.dialogs import notify
+from app.ui.select import Select
 from app.ui.tables import PillDelegate, SmartTable
 from app.ui.theme import C
 from app.ui.widgets import Button, IconButton, PageHeader, SegmentedControl, SlideBar, page_field
@@ -64,7 +65,7 @@ class LogsPage(QWidget):
         dl.addWidget(self.d_to)
         dl.addStretch(1)
         self.dates_bar = SlideBar(dw)
-        self.result = page_field(QComboBox())
+        self.result = page_field(Select())
         self.result.addItem("모든 결과", "ALL")
         for k, v in RESULT_TEXT.items():
             self.result.addItem(v, k)

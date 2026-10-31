@@ -308,7 +308,7 @@ def build_stylesheet(cache_dir):
     QSlider::handle:horizontal:hover {{ border-color: {C.grey400}; }}
     QSlider::groove:horizontal:disabled {{ background: {C.grey100}; }}
     QSlider::sub-page:horizontal:disabled {{ background: {C.grey300}; }}
-    QSlider::handle:horizontal:disabled {{ background: #FFFFFF; border: 1px solid {C.grey200}; }}
+    QSlider::handle:horizontal:disabled {{ background: {C.grey100}; border: 1px solid {C.grey200}; width: 18px; height: 18px; margin: -8px 0; border-radius: 10px; }}
 
     QPushButton {{
         background: {C.grey100}; color: {C.grey700}; border: none;

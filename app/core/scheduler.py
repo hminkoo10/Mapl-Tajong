@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -37,6 +38,8 @@ class Scheduler:
         self.paused = False
         self.next_event = None
         self._last_second = None
+        self._pause_cache = None      # (날짜, 오늘 쉼 여부)
+        self._last_recompute = 0.0
         # UI 알림용 콜백: on_ring(event, forced), on_event(kind, event)
         self.on_ring = None
         self.on_event = None
@@ -45,6 +48,22 @@ class Scheduler:
         self.running = True
         self.paused = False
         self.recompute_next()
+
+    def invalidate(self):
+        """시간표·설정이 바뀌면 캐시를 비운다."""
+        self._pause_cache = None
+
+    def is_paused_today(self, today=None):
+        today = today or datetime.now().strftime("%Y-%m-%d")
+        if self._pause_cache is None or self._pause_cache[0] != today:
+            self._pause_cache = (today, repo.is_pause_today(self.conn, today))
+        return self._pause_cache[1]
+
+    def undo(self, schedule_id, date_str, action):
+        """건너뛰기(SKIP_ONCE)나 미리 울림(FIRED_ONCE)을 취소한다."""
+        n = repo.remove_override(self.conn, date_str, schedule_id, action)
+        self.recompute_next()
+        return n > 0
 
     def pause(self):
         self.paused = True
@@ -94,11 +113,13 @@ class Scheduler:
         self._last_second = now.second
 
         today = now.strftime("%Y-%m-%d")
-        if repo.is_pause_today(self.conn, today):
+        if self.is_paused_today(today):
             return
 
         if not self.next_event:
-            self.recompute_next()
+            # 예정된 종이 없으면 매초가 아니라 30초마다만 다시 계산
+            if time.monotonic() - self._last_recompute >= 30:
+                self.recompute_next()
             return
 
         if now < self.next_event.run_at:
@@ -126,9 +147,12 @@ class Scheduler:
 
     def recompute_next(self):
         now = datetime.now()
+        self._last_recompute = time.monotonic()
         repo.purge_stale_overrides(self.conn, now.strftime("%Y-%m-%d"))
         set_id = repo.active_set_id(self.conn)
         schedules = repo.list_schedules(self.conn, set_id)
+        ov = repo.overrides_between(self.conn, now.strftime("%Y-%m-%d"),
+                                    (now + timedelta(days=8)).strftime("%Y-%m-%d"))
         best = None
 
         for day_offset in range(0, 8):
@@ -147,9 +171,8 @@ class Scheduler:
                     continue
 
                 sid = int(s["id"])
-                if repo.has_override(self.conn, date_str, sid, "SKIP_ONCE"):
-                    continue
-                if repo.has_override(self.conn, date_str, sid, "FIRED_ONCE"):
+                acts = ov.get((date_str, sid))
+                if acts and ("SKIP_ONCE" in acts or "FIRED_ONCE" in acts):
                     continue
 
                 ev = NextEvent(sid, str(s["name"]), run_at, str(s["sound_name"]),
@@ -171,7 +194,7 @@ class Scheduler:
         set_id = repo.active_set_id(self.conn)
         results = repo.today_results(self.conn, today)
         overrides = repo.overrides_for_date(self.conn, today)
-        paused_day = repo.is_pause_today(self.conn, today)
+        paused_day = self.is_paused_today(today)
         nxt = self.next_event
 
         out = []
@@ -190,7 +213,7 @@ class Scheduler:
                 if "SKIP_ONCE" in acts:
                     status = "will_skip"
                 elif "FIRED_ONCE" in acts:
-                    status = "played"
+                    status = "rang_early"   # 미리 울림 → 되돌리면 정해진 시간에 다시 울림
                 elif paused_day:
                     status = "paused"
                 elif nxt and nxt.schedule_id == sid and nxt.run_at == run_at:
@@ -198,7 +221,7 @@ class Scheduler:
                 else:
                     status = "upcoming"
             out.append({
-                "id": sid, "time": str(s["time_hhmm"]), "run_at": run_at, "name": str(s["name"]),
+                "id": sid, "date": today, "time": str(s["time_hhmm"]), "run_at": run_at, "name": str(s["name"]),
                 "sound": str(s["sound_name"]), "status": status,
             })
         return out
