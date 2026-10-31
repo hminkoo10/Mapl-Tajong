@@ -37,7 +37,36 @@ def step(name, fn):
         return None
 
 
+def weather_checks():
+    import json
+    import urllib.request
+    from app.core import weather
+    for city in ("서울", "수원"):
+        step(f"날씨 {city}", lambda c=city: (lambda d: f"{d['now']} today={d['today']} hours={len(d['hours'])}"
+                                            if d else "None")(weather.get(c, force=True)))
+    # 원본 응답 확인
+    def raw():
+        req = urllib.request.Request(f"{weather.API}?lat=37.5665&lon=126.9780",
+                                     headers={"User-Agent": weather.USER_AGENT, "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            body = r.read()
+            return f"status={r.status} bytes={len(body)} expires={r.headers.get('Expires')}"
+    step("날씨 원본 응답", raw)
+
+    def geo(q):
+        url = ("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=kr&accept-language=ko&q="
+               + urllib.parse.quote(q))
+        req = urllib.request.Request(url, headers={"User-Agent": weather.USER_AGENT})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        return [(x.get("display_name", "")[:50], x.get("lat"), x.get("lon"), x.get("addresstype")) for x in data[:3]]
+    import urllib.parse
+    for q in ("대치동", "분당구", "수원"):
+        step(f"지역 검색 {q}", lambda q=q: geo(q))
+
+
 def main():
+    weather_checks()
     print("yt-dlp", youtube.version(), flush=True)
     for q in ("school bell", "학교 종소리"):
         res = step(f"SoundCloud 검색 '{q}'", lambda q=q: youtube.search(q, 8, "soundcloud"))
