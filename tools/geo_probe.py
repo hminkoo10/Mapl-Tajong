@@ -83,5 +83,23 @@ def main():
             print("   오류:", e)
 
 
+def app_search():
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from app.core import weather
+    print("\n==== 앱 검색 결과 ====")
+    for addr in ADDRS + ["역삼동 737", "경기도 수원시 팔달구 효원로 241 3층"]:
+        try:
+            r = weather.search_places(addr)
+            top = r[0] if r else None
+            print(f"{addr:32} -> " + (f"{top['label']} {top['lat']:.4f},{top['lon']:.4f} exact={top.get('exact', False)} "
+                                      f"approx={top.get('approx')}" if top else "(없음)"))
+        except Exception as e:
+            print(f"{addr:32} -> 오류 {e}")
+
+
 if __name__ == "__main__":
-    main()
+    if "--app" in sys.argv:
+        app_search()
+    else:
+        main()

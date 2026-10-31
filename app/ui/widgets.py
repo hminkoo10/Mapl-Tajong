@@ -5,7 +5,7 @@
 import math
 import time
 
-from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPoint, QPointF, QRectF, QSize, Qt, QTimer,
+from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer,
                           QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QColor, QConicalGradient, QFont, QFontMetricsF, QPainter, QPen, QPixmap, QRegion
 from PyQt6.QtWidgets import (QAbstractButton, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QStackedWidget,
@@ -602,6 +602,9 @@ class RollingClock(QWidget):
         self._old = ""
         self._starts = {}
         self._dur = 0.36
+        self._metrics_key = None
+        self._digit_w = 0.0
+        self._char_w = {}
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._timer.setInterval(16)
@@ -611,6 +614,7 @@ class RollingClock(QWidget):
     def set_px(self, px):
         if px != self.px:
             self.px = px
+            self._metrics_key = None
             self.updateGeometry()
             self.update()
 
@@ -622,9 +626,38 @@ class RollingClock(QWidget):
         return font(self.px, self.weight)
 
     def _cells(self, text):
-        fm = QFontMetricsF(self._font())
-        dw = max(fm.horizontalAdvance(d) for d in "0123456789")
-        return [dw if ch.isdigit() else fm.horizontalAdvance(ch) for ch in text]
+        # 글자 폭은 크기가 바뀔 때만 다시 잰다
+        key = (self.px, int(self.weight.value) if hasattr(self.weight, "value") else int(self.weight))
+        if key != self._metrics_key:
+            fm = QFontMetricsF(self._font())
+            self._digit_w = max(fm.horizontalAdvance(d) for d in "0123456789")
+            self._char_w = {ch: fm.horizontalAdvance(ch) for ch in ":. -"}
+            self._fm_height = fm.height()
+            self._metrics_key = key
+        out = []
+        for ch in text:
+            if ch.isdigit():
+                out.append(self._digit_w)
+            else:
+                w = self._char_w.get(ch)
+                if w is None:
+                    w = self._char_w[ch] = QFontMetricsF(self._font()).horizontalAdvance(ch)
+                out.append(w)
+        return out
+
+    def _dirty_rect(self, indices):
+        """바뀌는 글자 칸만 다시 그리도록 (창 전체를 다시 그리지 않게) 그 영역을 계산."""
+        cells = self._cells(self._text)
+        total = sum(cells)
+        x0 = {"center": (self.width() - total) / 2, "right": self.width() - total}.get(self.align, 0.0)
+        xs = [x0]
+        for c in cells:
+            xs.append(xs[-1] + c)
+        lo = min(indices)
+        hi = max(indices)
+        if hi >= len(cells):
+            return self.rect()
+        return QRect(int(xs[lo]) - 2, 0, int(xs[hi + 1] - xs[lo]) + 5, self.height())
 
     def sizeHint(self):
         fm = QFontMetricsF(self._font())
@@ -650,14 +683,19 @@ class RollingClock(QWidget):
         self._text = s
         if self._starts and not self._timer.isActive():
             self._timer.start()
-        self.update()
+        if self._starts and len(old) == len(s):
+            self.update(self._dirty_rect(self._starts.keys()))
+        else:
+            self.update()
 
     def _tick(self):
         now = time.monotonic()
+        active = set(self._starts)
         self._starts = {i: t for i, t in self._starts.items() if now - t < self._dur}
         if not self._starts:
             self._timer.stop()
-        self.update()
+        if active:
+            self.update(self._dirty_rect(active))
 
     def paintEvent(self, e):
         p = QPainter(self)

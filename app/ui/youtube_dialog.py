@@ -205,6 +205,8 @@ class ResultCard(TickingWidget):
 
 
 class YoutubeDialog(BaseDialog):
+    enter_accepts = False
+
     def __init__(self, ctx, parent=None):
         super().__init__("종소리 찾기", "YouTube나 SoundCloud에서 소리만 받아 종소리로 만들어요.", None, parent, 760)
         self.ctx = ctx

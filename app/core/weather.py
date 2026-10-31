@@ -130,34 +130,60 @@ def parse_coords(text):
     return None
 
 
-def _nominatim(q, limit):
+def _nominatim(q, limit, structured=None):
     with _geo_lock:
         wait = 1.1 - (time.monotonic() - _geo_last[0])
         if wait > 0:
             time.sleep(wait)
         _geo_last[0] = time.monotonic()
-    url = (f"{GEO_URL}?format=jsonv2&addressdetails=1&limit={int(limit)}&countrycodes=kr&accept-language=ko&q="
-           + urllib.parse.quote(q))
+    url = f"{GEO_URL}?format=jsonv2&addressdetails=1&limit={int(limit)}&countrycodes=kr&accept-language=ko"
+    url += "&" + urllib.parse.urlencode(structured) if structured else "&q=" + urllib.parse.quote(q)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     with net.urlopen(req, timeout=12) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
-def _shorter(q):
-    """주소 뒷부분(번지·층·괄호)을 하나씩 떼어 낸 다음 검색어."""
-    q = q.strip().rstrip(",")
-    parts = q.split()
-    if len(parts) <= 1:
-        return None
-    last = parts[-1]
-    if _DETAIL.fullmatch(last) or any(ch.isdigit() for ch in last):
-        return " ".join(parts[:-1])
-    return " ".join(parts[:-1]) if len(parts) > 2 else None
+_ROAD = re.compile(r"^.+(?:대로|로|길)$")           # 도로명: 테헤란로, 동성로2길, 강남대로
+_LOT = re.compile(r"^.+(?:동|리|가)\d*$")              # 지번 주소의 동·리: 역삼동, 종로1가
+_NUM = re.compile(r"^(?:산)?\d+(?:-\d+)?(?:번지)?$")
+
+
+def parse_address(text):
+    """'서울 강남구 테헤란로 152 3층' → {'region': [...], 'road': '테헤란로', 'num': '152'} (도로명/지번이 아니면 None)"""
+    parts = (text or "").replace(",", " ").split()
+    for i in range(len(parts) - 1):
+        if (_ROAD.match(parts[i]) or _LOT.match(parts[i])) and _NUM.match(parts[i + 1]):
+            num = parts[i + 1].replace("번지", "")
+            return {"region": parts[:i], "road": parts[i], "num": num, "lot": not _ROAD.match(parts[i])}
+    return None
+
+
+def _queries(q):
+    """정확한 건물을 찾을 가능성이 큰 순서대로 검색 방법을 만든다."""
+    a = parse_address(q)
+    if not a:
+        return [(q, None)]
+    region, road, num = a["region"], a["road"], a["num"]
+    out = []
+    if not a["lot"]:
+        st = {"street": f"{num} {road}"}
+        if region:
+            st["city"] = region[-1]
+            if len(region) >= 2:
+                st["state"] = region[0]
+        out.append((None, st))
+    out.append((f"{num} {road}, " + ", ".join(reversed(region)) if region else f"{num} {road}", None))
+    out.append((" ".join(region + [road, num]), None))
+    return out
+
+
+def _house(x):
+    return str((x.get("address") or {}).get("house_number") or "")
 
 
 def search_places(query, limit=8):
     """동네·도시 이름, 도로명/지번 주소, 또는 좌표로 위치를 찾는다. [{'name','label','lat','lon'}]
-    주소가 지도 데이터에 그대로 없으면 번지 등 뒷부분을 줄여 가며 다시 찾는다.
+    도로명주소는 건물 번호까지 맞는 곳을 먼저 찾고, 없으면 번지 등 뒷부분을 줄여 가며 다시 찾는다.
     (Nominatim 이용 규칙: 1초에 한 번 이하, 입력할 때마다가 아니라 검색을 누를 때만)"""
     q = (query or "").strip()
     if not q:
@@ -166,32 +192,56 @@ def search_places(query, limit=8):
     if c:
         return [{"name": f"좌표 {c[0]:.4f}, {c[1]:.4f}", "label": f"좌표 {c[0]:.4f}, {c[1]:.4f}",
                  "lat": c[0], "lon": c[1]}]
-    tried, data, used = 0, [], q
+    addr = parse_address(q)
+    want = addr["num"] if addr else None
+    data, used = [], q
     try:
-        while used and tried < 4:
-            data = _nominatim(used, limit)
-            tried += 1
-            if data:
+        for text, st in _queries(q):
+            got = _nominatim(text, limit, st)
+            if got and (not want or any(_house(x) == want for x in got)):
+                data, used = got, q
                 break
-            used = _shorter(used)
+            if got and not data:
+                data, used = got, q
+        if not data:
+            used = _shorter(q)
+            tries = 0
+            while used and tries < 3:
+                data = _nominatim(used, limit)
+                tries += 1
+                if data:
+                    break
+                used = _shorter(used)
     except Exception as e:
         _log("지역 검색 실패", f"{q}: {e!r}")
         raise
+    if want:
+        data = sorted(data or [], key=lambda x: _house(x) != want)
     out, seen = [], set()
     for x in data or []:
         a = x.get("address") or {}
-        name = x.get("name") or a.get("road") or a.get("suburb") or a.get("city") or used
+        road, hn = a.get("road"), a.get("house_number")
+        if road and hn:
+            name = f"{road} {hn}"
+            bld = x.get("name") if x.get("name") and x.get("name") not in (road, hn) else ""
+        else:
+            name = x.get("name") or road or a.get("suburb") or a.get("city") or used
+            bld = ""
         area = [a.get(k) for k in ("state", "city", "county", "borough", "city_district", "town", "suburb", "quarter")
                 if a.get(k)]
-        area = [v for i, v in enumerate(area) if v != name and v not in area[:i]]
-        label = f"{name} ({' '.join(area[:3])})" if area else name
-        key = (round(float(x["lat"]), 3), round(float(x["lon"]), 3))
+        area = [v for i, v in enumerate(area) if v != name and v not in area[:i]][:3]
+        if bld:
+            area = [bld] + area
+        label = f"{name} ({' '.join(area)})" if area else name
+        key = (round(float(x["lat"]), 4), round(float(x["lon"]), 4))
         if key in seen:
             continue
         seen.add(key)
         item = {"name": name, "label": label, "lat": float(x["lat"]), "lon": float(x["lon"])}
-        if used != q:
-            item["approx"] = used
+        if want and hn == want:
+            item["exact"] = True
+        elif used != q or want:
+            item["approx"] = used if used != q else (f"{addr['road']}" if addr else used)
         out.append(item)
     return out
 

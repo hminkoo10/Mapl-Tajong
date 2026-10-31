@@ -276,16 +276,22 @@ class SmartTable(QTableWidget):
             self._timer.stop()
         self.viewport().update()
 
+    def _update_row(self, r):
+        if r is not None and r >= 0:
+            self.viewport().update(0, self.rowViewportPosition(r), self.viewport().width(), self.rowHeight(r))
+
     def mouseMoveEvent(self, e):
         r = self.rowAt(int(e.position().y()))
         if r != self._hover_row:
-            self._hover_row = r
-            self.viewport().update()
+            # 표 전체가 아니라 바뀐 두 줄만 다시 그린다
+            old, self._hover_row = self._hover_row, r
+            self._update_row(old)
+            self._update_row(r)
         super().mouseMoveEvent(e)
 
     def leaveEvent(self, e):
-        self._hover_row = -1
-        self.viewport().update()
+        old, self._hover_row = self._hover_row, -1
+        self._update_row(old)
         super().leaveEvent(e)
 
     def paintEvent(self, e):

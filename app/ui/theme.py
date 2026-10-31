@@ -2,6 +2,8 @@
 
 회색 계열 + 주황 포인트 하나. 그라데이션은 진행 표시 같은 곳에만 은은하게 쓴다.
 """
+from functools import lru_cache
+
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 
@@ -54,7 +56,18 @@ class C:
     shadow = QColor(0, 29, 58)
 
 
+@lru_cache(maxsize=2048)
+def _qc_cached(spec, alpha):
+    c = QColor(spec)
+    if alpha is not None:
+        c.setAlphaF(max(0.0, min(1.0, float(alpha))))
+    return c
+
+
 def qc(hex_or_color, alpha=None):
+    """색 만들기. 같은 색을 그릴 때마다 문자열을 다시 읽지 않도록 기억해 두고 사본을 준다."""
+    if isinstance(hex_or_color, str):
+        return QColor(_qc_cached(hex_or_color, None if alpha is None else round(float(alpha), 3)))
     c = QColor(hex_or_color)
     if alpha is not None:
         c.setAlphaF(max(0.0, min(1.0, float(alpha))))
@@ -109,11 +122,30 @@ def app_font():
     return f
 
 
+_font_cache = {}
+
+
 def font(px, weight=QFont.Weight.Normal, base=None):
-    f = QFont(base or QGuiApplication.font())
-    f.setPixelSize(max(1, int(round(px))))
-    f.setWeight(weight)
-    return f
+    """글꼴. 같은 크기·굵기는 한 번만 만들고 사본(값싼 공유 복사)을 준다."""
+    if base is not None:
+        f = QFont(base)
+        f.setPixelSize(max(1, int(round(px))))
+        f.setWeight(weight)
+        return f
+    key = (max(1, int(round(px))), int(weight.value) if hasattr(weight, "value") else int(weight))
+    f = _font_cache.get(key)
+    if f is None:
+        f = QFont(QGuiApplication.font())
+        f.setPixelSize(key[0])
+        f.setWeight(weight)
+        if len(_font_cache) > 512:
+            _font_cache.clear()
+        _font_cache[key] = f
+    return QFont(f)
+
+
+def reset_font_cache():
+    _font_cache.clear()
 
 
 def rounded(rect, r):
@@ -122,9 +154,7 @@ def rounded(rect, r):
     return p
 
 
-def paint_soft_shadow(p: QPainter, rect: QRectF, radius, strength=1.0, spread=10, dy=4):
-    """아주 옅은 그림자 (팝업/떠 있는 요소에만 사용)."""
-    p.save()
+def _draw_shadow_layers(p, rect, radius, strength, spread, dy):
     p.setPen(Qt.PenStyle.NoPen)
     layers = 12
     for i in range(layers):
@@ -135,7 +165,36 @@ def paint_soft_shadow(p: QPainter, rect: QRectF, radius, strength=1.0, spread=10
         p.setBrush(col)
         r = QRectF(rect).adjusted(-grow, -grow + dy * k, grow, grow + dy * k)
         p.drawRoundedRect(r, radius + grow, radius + grow)
-    p.restore()
+
+
+_shadow_cache = {}
+
+
+def paint_soft_shadow(p: QPainter, rect: QRectF, radius, strength=1.0, spread=10, dy=4):
+    """아주 옅은 그림자 (팝업/떠 있는 요소에만 사용).
+    12겹을 매번 그리면 무거우므로, 크기별로 한 번 그림으로 만들어 두고 그 그림을 찍는다."""
+    rect = QRectF(rect)
+    w, h = int(round(rect.width())), int(round(rect.height()))
+    if w <= 0 or h <= 0:
+        return
+    dev = p.device()
+    dpr = dev.devicePixelRatioF() if dev is not None and hasattr(dev, "devicePixelRatioF") else 1.0
+    pad = int(spread + abs(dy) + 2)
+    key = (w, h, round(float(radius), 1), round(float(strength), 2), round(float(spread), 1), round(float(dy), 1),
+           round(dpr, 2))
+    pm = _shadow_cache.get(key)
+    if pm is None:
+        pm = QPixmap(int((w + pad * 2) * dpr), int((h + pad * 2) * dpr))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.GlobalColor.transparent)
+        q = QPainter(pm)
+        q.setRenderHint(QPainter.RenderHint.Antialiasing)
+        _draw_shadow_layers(q, QRectF(pad, pad, w, h), radius, strength, spread, dy)
+        q.end()
+        if len(_shadow_cache) > 64:
+            _shadow_cache.clear()
+        _shadow_cache[key] = pm
+    p.drawPixmap(QPointF(rect.left() - pad, rect.top() - pad), pm)
 
 
 def paint_app_background(p: QPainter, rect: QRectF):

@@ -33,4 +33,4 @@ jobs:
         run: python tools/yt_probe.py
       - name: 도로명주소 검색 비교
         if: runner.os == 'Linux'
-        run: python tools/geo_probe.py
+        run: python tools/geo_probe.py --app

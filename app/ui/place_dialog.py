@@ -65,6 +65,8 @@ class _ResultRow(QWidget):
 
 
 class PlaceDialog(BaseDialog):
+    enter_accepts = False
+
     def __init__(self, current_name="", parent=None):
         super().__init__("날씨 지역 고르기", "동네·주소로 찾거나, 아래 도시에서 골라 주세요.", None, parent, 560)
         self.result = None
@@ -190,8 +192,10 @@ class PlaceDialog(BaseDialog):
                 row.clicked.connect(self._choose)
                 self.results.addWidget(row)
             approx = places and places[0].get("approx")
-            if places:
-                self.state.setText((f"정확한 주소는 못 찾아서 ‘{approx}’ 기준으로 찾았어요. " if approx else "")
+            if places and places[0].get("exact"):
+                self.state.setText("주소를 건물까지 찾았어요. 눌러서 고르세요.")
+            elif places:
+                self.state.setText((f"건물 번호까지는 못 찾아서 ‘{approx}’ 근처로 찾았어요. " if approx else "")
                                    + f"{len(places)}곳을 찾았어요. 눌러서 고르세요.")
             else:
                 self.state.setText("찾는 곳이 없어요. 동네(○○동)나 시·구 이름, 또는 도로명 주소로 찾아 보세요.")

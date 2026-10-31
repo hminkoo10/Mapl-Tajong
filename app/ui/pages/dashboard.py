@@ -80,6 +80,17 @@ class TodayList(TickingWidget):
         self._t_set = ticker().now()
         self.start_ticking()
 
+    def refresh_countdown(self):
+        """'n분 후' 글자가 바뀔 때만, 그 줄만 다시 그린다 (매초 목록 전체를 그리지 않게)."""
+        now = datetime.now()
+        for i, e in enumerate(self.events):
+            if e["status"] == "next":
+                label = remain_words((e["run_at"] - now).total_seconds())
+                if label != getattr(self, "_last_countdown", None):
+                    self._last_countdown = label
+                    self.update(0, i * self.ROW_H, self.width(), self.ROW_H)
+                return
+
     def next_row_y(self):
         for i, e in enumerate(self.events):
             if e["status"] == "next":
@@ -399,7 +410,7 @@ class DashboardPage(QWidget):
 
     def _on_second(self):
         self.tick()
-        self.timeline.update()
+        self.timeline.refresh_countdown()
         self._schedule_next_second()
 
     def showEvent(self, e):

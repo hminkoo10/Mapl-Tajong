@@ -20,7 +20,7 @@ from app.core.startup import sync_startup_path
 from app.core.watchdog import HangWatch, enable_crash_log
 from app.data.db import connect, init_schema
 from app.ui.main_window import MainWindow
-from app.ui.theme import app_font, build_stylesheet, load_fonts
+from app.ui.theme import app_font, build_stylesheet, load_fonts, reset_font_cache
 
 
 def read_schema():
@@ -88,6 +88,7 @@ def main():
 
     load_fonts(asset_path("fonts"))
     app.setFont(app_font())
+    reset_font_cache()
     ico = asset_path("ui", "app.ico")
     if ico.exists():
         app.setWindowIcon(QIcon(str(ico)))

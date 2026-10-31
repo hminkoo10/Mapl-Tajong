@@ -17,14 +17,34 @@ SHADOW = 22
 
 
 class _Dim(QWidget):
-    """대화상자가 열려 있는 동안 메인 창을 살짝 어둡게."""
+    """대화상자가 열려 있는 동안 메인 창을 살짝 어둡게.
+
+    어두워지는(밝아지는) 동안에는 뒤 화면을 한 번 찍어 둔 그림 위에 어둠만 덧칠한다.
+    그래야 애니메이션의 매 장면마다 메인 창 전체를 다시 그리지 않아 끊기지 않는다."""
 
     def __init__(self, host):
         super().__init__(host)
         self.k = 0.0
+        self._snap = None
         self.setGeometry(host.rect())
+        self.freeze()
         self.show()
         self.raise_()
+
+    def freeze(self):
+        try:
+            self.hide()
+            self._snap = self.parentWidget().grab()
+            self.show()
+            self.raise_()
+            self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        except Exception:
+            self._snap = None
+
+    def thaw(self):
+        self._snap = None
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+        self.update()
 
     def set_k(self, v):
         self.k = float(v)
@@ -32,6 +52,8 @@ class _Dim(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
+        if self._snap is not None:
+            p.drawPixmap(0, 0, self._snap)
         p.fillRect(self.rect(), qc("#000000", 0.28 * self.k))
 
 
@@ -125,6 +147,15 @@ class BaseDialog(QDialog):
         self._drag = None
         super().mouseReleaseEvent(e)
 
+    # 검색칸이 있는 창은 False: 입력칸의 Enter가 '닫기' 같은 기본 버튼을 누르지 않고 그 칸의 일(검색)만 한다
+    enter_accepts = True
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not self.enter_accepts:
+            e.accept()
+            return
+        super().keyPressEvent(e)
+
     # ---------- 열고 닫기 ----------
     def showEvent(self, e):
         super().showEvent(e)
@@ -135,7 +166,8 @@ class BaseDialog(QDialog):
             self.move(g.center().x() - self.width() // 2, g.center().y() - self.height() // 2)
         if isinstance(host, QMainWindow) and host.centralWidget() is not None and self._dim is None:
             self._dim = _Dim(host.centralWidget())
-            _anim(self._dim, 0.0, 1.0, 180, self._dim.set_k).start()
+            dim = self._dim
+            _anim(dim, 0.0, 1.0, 180, dim.set_k, on_done=dim.thaw).start()
         end = self.pos()
         start = end + QPoint(0, 12)
         self.setWindowOpacity(0.0)
@@ -152,6 +184,7 @@ class BaseDialog(QDialog):
             dim = self._dim
             self._dim = None
             try:
+                dim.freeze()
                 _anim(dim, dim.k, 0.0, 150, dim.set_k, on_done=dim.deleteLater).start()
             except RuntimeError:
                 pass
