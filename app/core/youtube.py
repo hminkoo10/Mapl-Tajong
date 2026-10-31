@@ -474,8 +474,11 @@ def _clip_via_ytdlp(m, url, seconds, tmp, source, cancel_event=None, status_cb=N
         except Cancelled:
             if not early["stop"]:
                 raise
-        files = sorted((f for f in work_dir.iterdir() if f.is_file() and f.stat().st_size > 0),
-                       key=lambda f: f.stat().st_size, reverse=True)
+        # 조각 임시 파일(-FragN)이 아니라 이어 붙인 본 파일(clip.xxx 또는 clip.xxx.part)을 쓴다
+        files = sorted((f for f in work_dir.iterdir()
+                        if f.is_file() and f.stat().st_size > 0 and "-Frag" not in f.name
+                        and f.name.startswith("clip.") and not f.name.endswith(".ytdl")),
+                       key=lambda f: (f.suffix == ".part", f.stat().st_size), reverse=True)
         if not files:
             return False, "yt-dlp 결과 파일 없음"
         r = ffmpeg._run(["-y", "-i", str(files[0]), "-t", str(int(seconds)), "-vn", "-ac", "2", "-ar", "44100",
