@@ -126,6 +126,12 @@ def build_installer(version, source_dir):
 
 
 def main():
+    # 영어 Windows 콘솔(cp1252)에서도 한글 메시지가 깨지거나 멈추지 않도록
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-installer", action="store_true", help="설치 파일은 만들지 않음")
     a = ap.parse_args()
