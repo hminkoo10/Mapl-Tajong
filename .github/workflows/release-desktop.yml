@@ -111,3 +111,11 @@ jobs:
         run: |
           gh release create "desktop-v${VERSION}" dist/installer/MaplTajong-Setup-*.exe dist/installer/*.sha256 \
             --target "$GITHUB_SHA" --title "마고 타종 ${VERSION} (Windows)" --notes-file release_notes.md
+
+      # 배포가 끝난 임시 release 브랜치는 지운다 (릴리스와 태그에 그대로 남아 있음)
+      - name: Clean up release branches
+        if: env.PUBLISH == '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/cleanup_release_branches.sh

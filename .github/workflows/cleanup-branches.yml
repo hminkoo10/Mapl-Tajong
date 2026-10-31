@@ -1,0 +1,21 @@
+# 배포가 끝난 임시 release 브랜치 정리 (배포 때도 자동으로 실행됨)
+name: Clean up branches
+
+on:
+  push:
+    branches: ["claude/**"]
+    paths: [".github/workflows/cleanup-branches.yml", "tools/cleanup_release_branches.sh"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete released release/* branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/cleanup_release_branches.sh
