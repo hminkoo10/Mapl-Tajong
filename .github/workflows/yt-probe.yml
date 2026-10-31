@@ -4,7 +4,7 @@ name: YouTube probe
 on:
   push:
     branches: ["claude/**"]
-    paths: ["tools/yt_probe.py", ".github/workflows/yt-probe.yml"]
+    paths: ["tools/yt_probe.py", ".github/workflows/yt-probe.yml", "app/core/youtube.py", "app/core/ffmpeg.py"]
   workflow_dispatch:
 
 permissions:
