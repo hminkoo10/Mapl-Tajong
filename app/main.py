@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 from app.core.bootstrap import seed_if_empty
 from app.core.paths import APP_NAME, app_data_dir, asset_path, resource_path, ui_cache_dir
 from app.core.single_instance import acquire
+from app.core.startup import sync_startup_path
 from app.data.db import connect, init_schema
 from app.ui.main_window import MainWindow
 from app.ui.theme import app_font, build_stylesheet, load_fonts
@@ -70,6 +71,11 @@ def main():
     if ico.exists():
         app.setWindowIcon(QIcon(str(ico)))
     app.setStyleSheet(build_stylesheet(ui_cache_dir()))
+
+    try:
+        sync_startup_path()
+    except Exception:
+        pass
 
     conn = connect()
     init_schema(conn, read_schema())

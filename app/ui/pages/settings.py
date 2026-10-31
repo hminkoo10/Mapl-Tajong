@@ -2,7 +2,7 @@ from datetime import datetime
 
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QProgressBar, QVBoxLayout, QWidget
 
 from app.core import backup, ffmpeg, youtube
 from app.core.paths import app_data_dir
@@ -90,12 +90,37 @@ class SettingsPage(QWidget):
         left.addStretch(1)
         cols.addLayout(left, 3)
 
+        upd = Card(padding=24)
+        upd.body.setSpacing(0)
+        upd.body.addWidget(_title("업데이트"))
+        upd.body.addSpacing(6)
+        self.btn_update = Button("확인", variant="secondary")
+        self.upd_row = _row(f"버전 {APP_VERSION}", " ", self.btn_update)
+        self.upd_status = self.upd_row.findChildren(QLabel)[1]
+        upd.body.addWidget(self.upd_row)
+        self.upd_progress = QProgressBar()
+        self.upd_progress.setRange(0, 1000)
+        self.upd_progress.hide()
+        upd.body.addWidget(self.upd_progress)
+        upd.body.addWidget(hline())
+        self.chk_auto_update = ToggleSwitch("")
+        upd.body.addWidget(_row("자동으로 업데이트",
+                                "새 버전이 나오면 받아 두었다가, 다음 종까지 10분 넘게 남았을 때 조용히 설치해요.",
+                                self.chk_auto_update))
+        self.notes_row = QWidget()
+        nl = QVBoxLayout(self.notes_row)
+        nl.setContentsMargins(0, 0, 0, 0)
+        nl.setSpacing(0)
+        nl.addWidget(hline())
+        self.btn_notes = Button("보기", variant="secondary")
+        nl.addWidget(_row("새로워진 점", "", self.btn_notes))
+        upd.body.addWidget(self.notes_row)
+        self.notes_row.hide()
+
         info = Card(padding=24)
         info.body.setSpacing(0)
         info.body.addWidget(_title("정보"))
         info.body.addSpacing(6)
-        info.body.addWidget(_row("버전", "", _value(APP_VERSION)))
-        info.body.addWidget(hline())
         info.body.addWidget(_row("만든 사람", "", _value(DEVELOPER)))
         info.body.addWidget(hline())
         ok_ff = ffmpeg.available()
@@ -109,6 +134,8 @@ class SettingsPage(QWidget):
         info.body.addWidget(_row("데이터 폴더", "", self.btn_folder))
         info.body.addStretch(1)
         rcol = QVBoxLayout()
+        rcol.setSpacing(16)
+        rcol.addWidget(upd)
         rcol.addWidget(info)
         rcol.addStretch(1)
         cols.addLayout(rcol, 2)
@@ -118,6 +145,47 @@ class SettingsPage(QWidget):
         self.btn_restore.clicked.connect(self.on_restore)
         self.btn_sched_csv.clicked.connect(self.on_sched_csv)
         self.btn_folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_data_dir()))))
+
+        self.um = ctx.updates
+        if self.um is not None:
+            self.chk_auto_update.setChecked(self.um.auto)
+            self.chk_auto_update.setEnabled(self.um.installed)
+            self.chk_auto_update.toggled.connect(self.um.set_auto)
+            self.btn_update.clicked.connect(self._on_update_button)
+            self.btn_notes.clicked.connect(self._show_notes)
+            self.um.changed.connect(self._sync_update)
+            self._sync_update()
+
+    def _sync_update(self):
+        um = self.um
+        text = um.status_text()
+        if not um.installed and um.state in ("idle", "latest"):
+            text += " · 자동 업데이트는 설치 버전에서만 돼요"
+        self.upd_status.setText(text)
+        st = um.state
+        if st in ("available", "ready") and um.info is not None:
+            self.btn_update.setText("업데이트" if um.installed else "받으러 가기")
+            self.btn_update.set_variant("primary")
+        else:
+            self.btn_update.setText("확인")
+            self.btn_update.set_variant("secondary")
+        self.btn_update.setEnabled(st not in ("checking", "downloading", "installing"))
+        self.btn_update.updateGeometry()
+        self.upd_progress.setVisible(st == "downloading")
+        self.upd_progress.setValue(int(um.progress * 1000))
+        self.notes_row.setVisible(um.info is not None and bool(um.info.notes.strip()))
+
+    def _on_update_button(self):
+        if self.um.state in ("available", "ready") and self.um.info is not None:
+            self.um.install_now()
+        else:
+            self.um.check(manual=True)
+
+    def _show_notes(self):
+        from app.core.updater import notes_to_text
+        if self.um.info is None:
+            return
+        notify(self, f"{self.um.info.version}에서 새로워진 점", notes_to_text(self.um.info.notes) or "-")
 
     def on_toggle_startup(self, on):
         try:

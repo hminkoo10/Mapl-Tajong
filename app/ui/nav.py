@@ -24,6 +24,7 @@ class _NavList(QWidget):
         self._hk = {}
         self._ha = {}
         self._a = None
+        self.badges = set()
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(len(items) * ITEM_H)
@@ -39,6 +40,13 @@ class _NavList(QWidget):
         self._a.start()
         if emit:
             self.currentChanged.emit(i)
+
+    def set_badge(self, i, on):
+        if on:
+            self.badges.add(i)
+        else:
+            self.badges.discard(i)
+        self.update()
 
     def _set_y(self, v):
         self._y = float(v)
@@ -96,6 +104,11 @@ class _NavList(QWidget):
             p.setPen(mix(C.grey600, C.grey900, k))
             p.setFont(font(15, QFont.Weight.DemiBold if k > 0.5 else QFont.Weight.Medium))
             p.drawText(QRectF(46, r.top(), w - 50, r.height()), Qt.AlignmentFlag.AlignVCenter, text)
+            if i in self.badges:
+                tw = p.fontMetrics().horizontalAdvance(text)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(qc(C.accent))
+                p.drawEllipse(QPointF(46 + tw + 8, r.center().y() - 6), 3.5, 3.5)
 
 
 class _Logo(QWidget):

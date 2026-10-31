@@ -14,6 +14,7 @@ class AppContext(QObject):
         self.scheduler = scheduler
         self.window = window
         self.toasts = None
+        self.updates = None
         scheduler.on_ring = lambda ev, forced: self.rang.emit(ev, forced)
         scheduler.on_event = lambda kind, ev: self.scheduler_event.emit(kind, ev)
 

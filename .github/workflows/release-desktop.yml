@@ -1,0 +1,71 @@
+# 데스크톱(Windows) 배포
+# desktop-v2.0.1 처럼 태그를 올리면: exe 빌드 → 설치 파일 생성 → GitHub Release에 올림
+# 설치된 프로그램은 이 Release의 MaplTajong-Setup-x.y.z.exe 를 찾아 자동으로 업데이트한다.
+name: Desktop release
+
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read version
+        shell: python
+        run: |
+          import os, re
+          text = open("app/core/version.py", encoding="utf-8").read()
+          version = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', text).group(1)
+          ref = os.environ.get("GITHUB_REF", "")
+          if ref.startswith("refs/tags/"):
+              tag = ref.split("/", 2)[2]
+              if tag != f"desktop-v{version}":
+                  raise SystemExit(f"태그({tag})와 app/core/version.py 의 버전({version})이 달라요.")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              f.write(f"VERSION={version}\n")
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build
+        run: python tools/build.py
+
+      - name: Release notes
+        shell: python
+        run: |
+          import os, re
+          v = os.environ["VERSION"]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"^##\s*\[?{re.escape(v)}\]?[^\n]*\n(.*?)(?=^##\s|\Z)", text, re.M | re.S)
+          body = m.group(1).strip() if m else "더 안정적으로 다듬었어요."
+          open("release_notes.md", "w", encoding="utf-8").write(body + "\n")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MaplTajong-${{ env.VERSION }}
+          path: dist/installer/*
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/installer/MaplTajong-Setup-*.exe dist/installer/*.sha256 \
+            --title "마고 타종 ${VERSION} (Windows)" --notes-file release_notes.md

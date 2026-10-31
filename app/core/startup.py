@@ -43,3 +43,22 @@ def disable_startup():
         winreg.CloseKey(key)
     except FileNotFoundError:
         pass
+
+
+def sync_startup_path():
+    """설치 위치가 바뀌었으면(예: 예전 exe → 설치 버전) 자동 실행 경로를 지금 실행 파일로 맞춘다."""
+    if winreg is None or not getattr(sys, "frozen", False):
+        return
+    want = f'"{sys.executable}"'
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE)
+    except OSError:
+        return
+    try:
+        cur, _ = winreg.QueryValueEx(key, APP_NAME)
+        if str(cur).strip().strip('"').lower() != sys.executable.lower():
+            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, want)
+    except FileNotFoundError:
+        pass
+    finally:
+        winreg.CloseKey(key)

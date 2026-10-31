@@ -8,7 +8,8 @@ from app.core.scheduler import Scheduler
 from app.core.version import APP_TITLE, APP_VERSION, DEVELOPER
 from app.ui import icons
 from app.ui.context import AppContext
-from app.ui.dialogs import confirm
+from app.core.updater import notes_to_text
+from app.ui.dialogs import confirm, notify
 from app.ui.fullscreen_clock import FullscreenClock
 from app.ui.nav import NavSidebar
 from app.ui.pages.dashboard import DashboardPage
@@ -17,6 +18,7 @@ from app.ui.pages.schedules import SchedulesPage
 from app.ui.pages.settings import SettingsPage
 from app.ui.pages.sounds import SoundsPage
 from app.ui.theme import C
+from app.ui.update_manager import UpdateManager
 from app.ui.widgets import AnimatedStack, Button, ToastManager
 
 NAV = [("dashboard", "홈"), ("calendar", "시간표"), ("bell", "종소리"), ("logs", "기록"), ("settings", "설정")]
@@ -47,12 +49,15 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.stack, 1)
 
         self.scheduler.start()
+        self.updates = UpdateManager(self.ctx, self.quit_for_update)
+        self.ctx.updates = self.updates
         self.dashboard = DashboardPage(self.ctx)
         self.pages = [self.dashboard, SchedulesPage(self.ctx), SoundsPage(self.ctx), LogsPage(self.ctx),
                       SettingsPage(self.ctx)]
         for p in self.pages:
             self.stack.addWidget(p)
         self.nav.currentChanged.connect(lambda i: self.stack.switch_to(i))
+        self.updates.changed.connect(lambda: self.nav.list.set_badge(4, self.updates.has_update()))
         self.dashboard.openFullscreen.connect(self.open_fullscreen)
 
         btn_full = Button("전체화면 시계", variant="secondary")
@@ -79,6 +84,15 @@ class MainWindow(QMainWindow):
         if not self._revealed:
             self._revealed = True
             QTimer.singleShot(30, lambda: self.stack.reveal())
+            QTimer.singleShot(900, self._show_whats_new)
+
+    def _show_whats_new(self):
+        got = self.updates.take_whats_new()
+        if not got:
+            return
+        version, notes = got
+        text = notes_to_text(notes) or "더 안정적으로 다듬었어요."
+        notify(self, f"{version} 버전으로 업데이트했어요", text)
 
     # ---------------- 트레이 ----------------
     def _app_icon(self):
@@ -164,12 +178,7 @@ class MainWindow(QMainWindow):
         w.activateWindow()
         self._fullscreen = w
 
-    def on_exit_app(self):
-        if self.isHidden():
-            self._tray_show()
-        if not confirm(self, "프로그램을 끌까요?", "끄면 정해진 시간에 종이 울리지 않아요.\n창만 숨기려면 오른쪽 위 X를 누르세요.",
-                       "끄기", danger=True):
-            return
+    def _shutdown(self):
         try:
             self.scheduler.stop()
             self.player.stop()
@@ -186,3 +195,15 @@ class MainWindow(QMainWindow):
                 pass
         self._really_quit = True
         self.app.quit()
+
+    def quit_for_update(self):
+        """설치 파일이 프로그램 파일을 바꿀 수 있도록 바로 종료."""
+        self._shutdown()
+
+    def on_exit_app(self):
+        if self.isHidden():
+            self._tray_show()
+        if not confirm(self, "프로그램을 끌까요?", "끄면 정해진 시간에 종이 울리지 않아요.\n창만 숨기려면 오른쪽 위 X를 누르세요.",
+                       "끄기", danger=True):
+            return
+        self._shutdown()
