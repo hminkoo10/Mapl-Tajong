@@ -48,11 +48,10 @@ class DownloadThread(QThread):
     failed = pyqtSignal(str)
     cancelled = pyqtSignal()
 
-    def __init__(self, url, out_dir, browser=None):
+    def __init__(self, url, out_dir):
         super().__init__()
         self.url = url
         self.out_dir = out_dir
-        self.browser = browser
         self.cancel_event = threading.Event()
 
     def cancel(self):
@@ -62,8 +61,7 @@ class DownloadThread(QThread):
         from app.core import youtube
         try:
             path, title = youtube.download_audio(self.url, self.out_dir,
-                                                 lambda f, s: self.progress.emit(float(f), s), self.cancel_event,
-                                                 self.browser)
+                                                 lambda f, s: self.progress.emit(float(f), s), self.cancel_event)
             self.done.emit(str(path), str(title))
         except youtube.Cancelled:
             self.cancelled.emit()

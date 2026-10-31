@@ -1,4 +1,4 @@
-"""YouTube에서 종소리 검색 → 미리 듣기 → 오디오만 다운로드 → (다듬은 뒤) 종소리로 등록."""
+"""YouTube·SoundCloud에서 종소리 검색 → 미리 듣기 → 소리만 받기 → (다듬은 뒤) 종소리로 등록."""
 import threading
 import time
 from pathlib import Path
@@ -8,15 +8,15 @@ from PyQt6.QtGui import QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QPix
 from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QScrollArea, QSizePolicy,
                              QVBoxLayout, QWidget)
 
-from app.core import ffmpeg, sound_files, youtube
+from app.core import ffmpeg, google_login, sound_files, youtube
 from app.core.paths import download_tmp_dir
 from app.ui import icons
 from app.data import repo
-from app.ui.dialogs import BaseDialog, confirm
-from app.ui.select import Menu
+from app.ui.dialogs import BaseDialog
 from app.ui.sound_editor import SoundEditorDialog
 from app.ui.theme import C, font, mix, qc
-from app.ui.widgets import Button, ChipButton, Spinner, TickingWidget, _anim, ease_out_cubic, ticker
+from app.ui.widgets import (Button, ChipButton, SegmentedControl, Spinner, TickingWidget, _anim, ease_out_cubic,
+                            ticker)
 from app.ui.workers import DownloadThread, ThumbThread, keep_alive, run_async
 
 class _Status(QObject):
@@ -24,7 +24,14 @@ class _Status(QObject):
     text = pyqtSignal(str)
 
 
-SUGGESTIONS = ["학교 종소리", "수업 시작종", "차임벨 효과음", "띵동댕동", "쉬는 시간 종", "알림음 효과음"]
+SUGGESTIONS = {
+    "youtube": ["학교 종소리", "수업 시작종", "차임벨 효과음", "띵동댕동", "쉬는 시간 종", "알림음 효과음"],
+    "soundcloud": ["school bell", "chime", "bell ring", "doorbell", "notification sound", "학교 종소리"],
+}
+PLACEHOLDER = {
+    "youtube": "검색어나 YouTube 주소를 입력하세요",
+    "soundcloud": "검색어나 SoundCloud 주소를 입력하세요 (영어로 찾으면 더 많이 나와요)",
+}
 PREVIEW_SEC = 30
 
 
@@ -199,7 +206,7 @@ class ResultCard(TickingWidget):
 
 class YoutubeDialog(BaseDialog):
     def __init__(self, ctx, parent=None):
-        super().__init__("YouTube에서 종소리 찾기", "영상에서 소리만 받아 종소리로 만들어요.", None, parent, 760)
+        super().__init__("종소리 찾기", "YouTube나 SoundCloud에서 소리만 받아 종소리로 만들어요.", None, parent, 760)
         self.ctx = ctx
         self.result_id = None
         self.cards = []
@@ -216,11 +223,28 @@ class YoutubeDialog(BaseDialog):
         self._retry = None
         self._status = _Status(self)
         self._status.text.connect(self._status_text)
+        saved = repo.get_setting(ctx.conn, "search_source", "youtube")
+        self.source = saved if saved in youtube.SOURCES else "youtube"
+
+        top = QHBoxLayout()
+        top.setSpacing(10)
+        self.src_switch = SegmentedControl(["YouTube", "SoundCloud"])
+        self.src_switch.set_current(youtube.SOURCES.index(self.source), animate=False)
+        self.src_switch.changed.connect(self._on_source)
+        top.addWidget(self.src_switch)
+        top.addStretch(1)
+        self.login_label = QLabel("")
+        self.login_label.setStyleSheet(f"color: {C.grey500}; font-size: 13px;")
+        top.addWidget(self.login_label)
+        self.btn_google = Button("구글 로그인", variant="subtle", size="sm")
+        self.btn_google.clicked.connect(lambda: self._google_login())
+        top.addWidget(self.btn_google)
+        self.body.addLayout(top)
 
         row = QHBoxLayout()
         row.setSpacing(8)
         self.query = QLineEdit()
-        self.query.setPlaceholderText("검색어나 YouTube 주소를 입력하세요")
+        self.query.setPlaceholderText(PLACEHOLDER[self.source])
         self.query.addAction(icons.icon("search", C.grey500, 16), QLineEdit.ActionPosition.LeadingPosition)
         self.query.returnPressed.connect(self.search)
         self.btn_search = Button("검색", variant="primary")
@@ -229,14 +253,10 @@ class YoutubeDialog(BaseDialog):
         row.addWidget(self.btn_search)
         self.body.addLayout(row)
 
-        chips = QHBoxLayout()
-        chips.setSpacing(6)
-        for s in SUGGESTIONS:
-            c = ChipButton(s, checkable=False)
-            c.clicked.connect(lambda _=False, q=s: (self.query.setText(q), self.search()))
-            chips.addWidget(c)
-        chips.addStretch(1)
-        self.body.addLayout(chips)
+        self.chips = QHBoxLayout()
+        self.chips.setSpacing(6)
+        self.body.addLayout(self.chips)
+        self._fill_chips()
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -264,9 +284,9 @@ class YoutubeDialog(BaseDialog):
         self.progress.setFixedWidth(220)
         self.progress.hide()
         sl.addWidget(self.progress)
-        self.btn_login = Button("브라우저 로그인으로 받기", variant="soft", size="sm")
+        self.btn_login = Button("구글 로그인하고 받기", variant="primary", size="sm")
         self.btn_login.hide()
-        self.btn_login.clicked.connect(self._offer_login)
+        self.btn_login.clicked.connect(self._do_retry)
         sl.addWidget(self.btn_login)
         self.btn_cancel_dl = Button("취소", variant="subtle", size="sm")
         self.btn_cancel_dl.hide()
@@ -290,18 +310,62 @@ class YoutubeDialog(BaseDialog):
         self._set_actions_enabled(False)
 
         self._empty("무엇을 찾을까요?\n위의 추천 검색어를 눌러도 돼요.")
+        self._sync_login()
         if not youtube.available():
-            self._set_state("yt-dlp가 설치되어 있지 않아 YouTube 기능을 쓸 수 없어요.", error=True)
+            self._set_state("yt-dlp가 설치되어 있지 않아 찾기 기능을 쓸 수 없어요.", error=True)
             self.btn_search.setEnabled(False)
         elif not ffmpeg.available():
             self._set_state("ffmpeg를 찾을 수 없어 소리를 변환할 수 없어요.", error=True)
         self.resize(820, 720)
         QTimer.singleShot(0, self.query.setFocus)
 
-    # ---------------- 상태 ----------------
-    def _browser(self):
-        return repo.get_setting(self.ctx.conn, "yt_cookie_browser", "") or None
+    # ---------------- 소리 출처 / 구글 로그인 ----------------
+    def _fill_chips(self):
+        while self.chips.count():
+            it = self.chips.takeAt(0)
+            if it.widget():
+                it.widget().hide()
+                it.widget().deleteLater()
+        for s in SUGGESTIONS[self.source]:
+            c = ChipButton(s, checkable=False)
+            c.clicked.connect(lambda _=False, q=s: (self.query.setText(q), self.search()))
+            self.chips.addWidget(c)
+        self.chips.addStretch(1)
 
+    def _on_source(self, i):
+        src = youtube.SOURCES[i]
+        if src == self.source:
+            return
+        self.source = src
+        repo.set_setting(self.ctx.conn, "search_source", src)
+        self._search_seq += 1
+        self.query.setPlaceholderText(PLACEHOLDER[src])
+        self._fill_chips()
+        self._sync_login()
+        self.btn_search.setEnabled(self._dl is None)
+        self._empty("무엇을 찾을까요?\n위의 추천 검색어를 눌러도 돼요.")
+        self._set_state("")
+        if self.query.text().strip() and not youtube.looks_like_url(self.query.text()):
+            self.search()
+
+    def _sync_login(self):
+        yt = self.source == "youtube"
+        on = google_login.is_logged_in()
+        self.login_label.setVisible(yt and on)
+        self.login_label.setText("구글 로그인됨")
+        self.btn_google.setVisible(yt and not on)
+
+    def _google_login(self, then=None):
+        from app.ui.google_login_dialog import login
+        self.stop_preview()
+        if login(self):
+            self.ctx.toast("구글 로그인했어요", "success")
+            self._sync_login()
+            if then:
+                then()
+        self._sync_login()
+
+    # ---------------- 상태 ----------------
     def _status_text(self, text):
         try:
             if self.spinner.isVisible():
@@ -312,7 +376,8 @@ class YoutubeDialog(BaseDialog):
     def _set_state(self, text, busy=False, error=False, retry=None):
         self._retry = retry if error and youtube.is_blocked_message(text) else None
         try:
-            self.btn_login.setVisible(self._retry is not None and bool(youtube.installed_browsers()))
+            self.btn_login.setText("다시 로그인하고 받기" if google_login.is_logged_in() else "구글 로그인하고 받기")
+            self.btn_login.setVisible(self._retry is not None)
         except RuntimeError:
             return
         self.state_label.setText(text)
@@ -358,8 +423,17 @@ class YoutubeDialog(BaseDialog):
         self._empty("")
         self._set_state("찾고 있어요", busy=True)
         self.btn_search.setEnabled(False)
-        fn = youtube.probe if youtube.looks_like_url(q) else youtube.search
-        run_async(fn, q, on_done=lambda res: self._results(seq, res), on_fail=lambda m: self._search_failed(seq, m))
+        if youtube.looks_like_url(q):
+            src = youtube.source_of(q if q.startswith("http") else "https://" + q)
+            if src != self.source:
+                self.src_switch.set_current(youtube.SOURCES.index(src), animate=True)
+                self.source = src
+                self._sync_login()
+            run_async(youtube.probe, q, on_done=lambda res: self._results(seq, res),
+                      on_fail=lambda m: self._search_failed(seq, m))
+        else:
+            run_async(youtube.search, q, 15, self.source, on_done=lambda res: self._results(seq, res),
+                      on_fail=lambda m: self._search_failed(seq, m))
 
     def _search_failed(self, seq, msg):
         try:
@@ -436,7 +510,7 @@ class YoutubeDialog(BaseDialog):
         card.set_preview("loading")
         self._set_state("미리 듣기를 준비하고 있어요", busy=True)
         self._sync_preview_button()
-        run_async(youtube.preview_clip, card.data["url"], PREVIEW_SEC, self._pv_cancel, self._browser(),
+        run_async(youtube.preview_clip, card.data["url"], PREVIEW_SEC, self._pv_cancel,
                   self._status.text.emit,
                   on_done=lambda path: self._preview_ready(seq, card, path),
                   on_fail=lambda msg: self._preview_failed(seq, card, msg))
@@ -498,7 +572,7 @@ class YoutubeDialog(BaseDialog):
             return
         self.stop_preview()
         data = self.selected.data
-        self._dl = DownloadThread(data["url"], download_tmp_dir(), self._browser())
+        self._dl = DownloadThread(data["url"], download_tmp_dir())
         self._dl_edit = edit
         self._dl_title = data.get("title") or "YouTube 종소리"
         self._dl.progress.connect(self._dl_progress)
@@ -572,32 +646,10 @@ class YoutubeDialog(BaseDialog):
                 pass
         self.accept()
 
-    # ---------------- 브라우저 로그인 ----------------
-    def _offer_login(self):
-        found = youtube.installed_browsers()
-        if not found:
-            return
-        m = Menu(self)
-        cur = self._browser()
-        for key, label in found:
-            act = m.addAction(f"{label}{'  ✓' if key == cur else ''}")
-            act.setData(key)
-        chosen = m.exec(self.btn_login.mapToGlobal(self.btn_login.rect().bottomLeft()))
-        if not chosen:
-            return
-        key = str(chosen.data())
-        if not repo.get_setting(self.ctx.conn, "yt_cookie_ok", ""):
-            if not confirm(self, f"{youtube.browser_label(key)} 로그인 정보를 쓸까요?",
-                           "그 브라우저에 로그인된 YouTube 정보로 다시 받아요. 정보는 이 컴퓨터 안에서만 쓰고 "
-                           "다른 곳으로 보내지 않아요.\n설정 → YouTube 로그인에서 언제든 끌 수 있어요.",
-                           "사용하기", danger=False):
-                return
-            repo.set_setting(self.ctx.conn, "yt_cookie_ok", "1")
-        repo.set_setting(self.ctx.conn, "yt_cookie_browser", key)
+    def _do_retry(self):
         retry, self._retry = self._retry, None
         self.btn_login.hide()
-        if retry:
-            retry()
+        self._google_login(then=retry)
 
     def reject(self):
         self.stop_preview()

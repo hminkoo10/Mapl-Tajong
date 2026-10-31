@@ -170,20 +170,12 @@ class SettingsPage(QWidget):
         yt_text = "없음" if not yv else (f"{yv} · 준비됨" if ready else f"{yv} · 일부 영상 제한")
         info.body.addWidget(_row("YouTube (yt-dlp)", "", _value(yt_text, C.grey700 if ready else C.danger)))
         info.body.addWidget(hline())
-        self.yt_login = Select()
-        self.yt_login.setProperty("page", True)
-        self.yt_login.addItem("사용 안 함", "")
-        cur = repo.get_setting(self.conn, "yt_cookie_browser", "")
-        found = youtube.installed_browsers()
-        if cur and cur not in dict(found):
-            found.append((cur, youtube.browser_label(cur)))
-        for key, label in found:
-            self.yt_login.addItem(label, key)
-        i = self.yt_login.findData(cur)
-        self.yt_login.setCurrentIndex(max(0, i))
-        self.yt_login.setMinimumWidth(150)
-        self.yt_login.currentIndexChanged.connect(self._on_yt_login)
-        info.body.addWidget(_row("YouTube 로그인", "막히면 이 브라우저의 로그인 정보로 받아요.", self.yt_login))
+        self.btn_google = Button("로그인", variant="secondary")
+        self.btn_google.clicked.connect(self._on_google)
+        self.google_row = _row("YouTube 구글 로그인", " ", self.btn_google)
+        self.google_desc = self.google_row.findChildren(QLabel)[1]
+        info.body.addWidget(self.google_row)
+        self._sync_google()
         info.body.addWidget(hline())
         self.btn_folder = Button("열기", variant="secondary")
         info.body.addWidget(_row("데이터 폴더", "", self.btn_folder))
@@ -267,14 +259,33 @@ class SettingsPage(QWidget):
         from app.ui.changelog_dialog import ChangelogDialog
         ChangelogDialog(self).exec()
 
-    def _on_yt_login(self, _i):
-        key = self.yt_login.currentData() or ""
-        repo.set_setting(self.conn, "yt_cookie_browser", key)
-        if key:
-            repo.set_setting(self.conn, "yt_cookie_ok", "1")
-            self.ctx.toast(f"막히면 {youtube.browser_label(key)} 로그인 정보로 받아요", "success")
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._sync_google()
+
+    def _sync_google(self):
+        from app.core import google_login
+        on = google_login.is_logged_in()
+        if on:
+            ts = google_login.logged_in_at()
+            when = datetime.fromtimestamp(ts).strftime("%Y년 %m월 %d일") if ts else ""
+            self.google_desc.setText(f"로그인됨{' · ' + when if when else ''}. YouTube에서 받을 때 이 계정을 써요.")
         else:
-            self.ctx.toast("YouTube 로그인을 쓰지 않아요")
+            self.google_desc.setText("YouTube가 막을 때 로그인하면 받을 수 있어요. 자주 쓰지 않는 계정이어도 돼요.")
+        self.btn_google.setText("로그아웃" if on else "로그인")
+        self.btn_google.updateGeometry()
+
+    def _on_google(self):
+        from app.core import google_login
+        if google_login.is_logged_in():
+            if confirm(self, "구글 로그아웃할까요?", "이 컴퓨터에 저장한 로그인 정보를 지워요.", "로그아웃", danger=False):
+                google_login.logout()
+                self.ctx.toast("로그아웃했어요")
+        else:
+            from app.ui.google_login_dialog import login
+            if login(self):
+                self.ctx.toast("구글 로그인했어요", "success")
+        self._sync_google()
 
     def on_toggle_startup(self, on):
         try:
