@@ -5,7 +5,7 @@ on:
   push:
     branches: ["claude/**"]
     paths: ["tools/yt_probe.py", ".github/workflows/yt-probe.yml", "app/core/youtube.py", "app/core/ffmpeg.py",
-            "app/core/weather.py", "app/core/net.py"]
+            "app/core/weather.py", "app/core/net.py", "tools/geo_probe.py"]
   workflow_dispatch:
 
 permissions:
@@ -31,3 +31,6 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Probe (앱에 들어가는 ffmpeg)
         run: python tools/yt_probe.py
+      - name: 도로명주소 검색 비교
+        if: runner.os == 'Linux'
+        run: python tools/geo_probe.py
