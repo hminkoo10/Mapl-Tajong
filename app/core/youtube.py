@@ -383,13 +383,39 @@ def preview_clip(url, seconds=30, cancel_event: threading.Event = None, status_c
         stream = info.get("url") or next((f.get("url") for f in info.get("requested_formats") or [] if f.get("url")), None)
         if not stream:
             raise YoutubeError("requested format is not available")
-        return stream, info.get("http_headers") or {}
+        return stream, info.get("http_headers") or {}, f"{info.get('format_id')}/{info.get('protocol')}"
 
-    stream, headers = _run(m, base, logger, work, source, cancel_event, status_cb)
+    stream, headers, fmt = _run(m, base, logger, work, source, cancel_event, status_cb)
     if cancel_event is not None and cancel_event.is_set():
         raise Cancelled("취소했어요.")
-    hdr = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
     tmp = out.with_name(out.stem + ".part.wav")
+    ok, detail = _ffmpeg_clip(stream, headers, seconds, tmp)
+    if not ok:
+        # 조각으로 나뉜 스트림 등 ffmpeg가 바로 못 여는 경우: yt-dlp가 앞부분만 받아 오게 한다
+        _log("미리 듣기 1차 실패", f"{fmt} {detail}")
+        try:
+            ok, detail = _clip_via_ytdlp(m, url, seconds, tmp, source, cancel_event, status_cb)
+        except Cancelled:
+            raise
+        except Exception as e:
+            ok, detail = False, str(e)
+    if not ok:
+        _log("미리 듣기 변환 실패", f"{fmt} {detail}")
+        tmp.unlink(missing_ok=True)
+        raise YoutubeError("미리 듣기를 준비하지 못했어요. 잠시 뒤 다시 해 보세요.")
+    tmp.replace(out)
+    return out
+
+
+def _wav_ok(path):
+    try:
+        return path.exists() and path.stat().st_size > 1000
+    except OSError:
+        return False
+
+
+def _ffmpeg_clip(stream, headers, seconds, tmp):
+    hdr = "".join(f"{k}: {v}\r\n" for k, v in (headers or {}).items())
     args = ["-y"]
     if hdr:
         args += ["-headers", hdr]
@@ -397,13 +423,68 @@ def preview_clip(url, seconds=30, cancel_event: threading.Event = None, status_c
     try:
         r = ffmpeg._run(args, timeout=90, capture_stdout=False)
     except ffmpeg.FfmpegError as e:
-        raise YoutubeError(str(e))
-    if r.returncode != 0 or not tmp.exists() or tmp.stat().st_size < 1000:
-        _log("미리 듣기 변환 실패", ffmpeg._tail(r.stderr, 6))
-        tmp.unlink(missing_ok=True)
-        raise YoutubeError("미리 듣기를 준비하지 못했어요. 잠시 뒤 다시 해 보세요.")
-    tmp.replace(out)
-    return out
+        return False, str(e)
+    if r.returncode == 0 and _wav_ok(tmp):
+        return True, ""
+    return False, f"rc={r.returncode} size={tmp.stat().st_size if tmp.exists() else 0} {ffmpeg._tail(r.stderr, 8)}"
+
+
+def _clip_via_ytdlp(m, url, seconds, tmp, source, cancel_event=None, status_cb=None):
+    """yt-dlp가 (조각 스트림이면 조각을 하나씩) 직접 받다가 앞부분이 모이면 멈추고, 받은 만큼을 wav로 바꾼다.
+    ffmpeg는 이 컴퓨터에 받은 파일만 읽으므로 네트워크 스트림을 열다 생기는 문제를 피한다."""
+    import shutil as _sh
+    import tempfile as _tf
+    work_dir = Path(_tf.mkdtemp(prefix="pv_", dir=str(temp_dir())))
+    early = {"stop": False}
+    need = int(seconds) + 12   # 받다 만 조각은 빠지므로 넉넉히
+
+    def hook(d):
+        if cancel_event is not None and cancel_event.is_set():
+            raise m.utils.DownloadCancelled("cancelled")
+        if d.get("status") != "downloading":
+            return
+        info = d.get("info_dict") or {}
+        dur = info.get("duration") or 0
+        idx, cnt = d.get("fragment_index") or 0, d.get("fragment_count") or 0
+        got = d.get("downloaded_bytes") or 0
+        rate = (info.get("abr") or info.get("tbr") or 160) * 1000 / 8   # 초당 바이트
+        enough = (cnt and dur and idx / cnt * dur >= need) or got >= rate * need * 1.3
+        if enough:
+            early["stop"] = True
+            raise m.utils.DownloadCancelled("enough")
+
+    logger = _Logger()
+    base = _base_opts(logger)
+    base.update({
+        "format": "bestaudio/best",
+        "outtmpl": str(work_dir / "clip.%(ext)s"),
+        "progress_hooks": [hook],
+        "hls_prefer_native": True,
+        "continuedl": False,
+        "max_filesize": 120 * 1024 * 1024,
+    })
+
+    def work(opts):
+        with m.YoutubeDL(opts) as ydl:
+            return ydl.extract_info(url, download=True)
+
+    try:
+        try:
+            _run(m, base, logger, work, source, cancel_event, status_cb)
+        except Cancelled:
+            if not early["stop"]:
+                raise
+        files = sorted((f for f in work_dir.iterdir() if f.is_file() and f.stat().st_size > 0),
+                       key=lambda f: f.stat().st_size, reverse=True)
+        if not files:
+            return False, "yt-dlp 결과 파일 없음"
+        r = ffmpeg._run(["-y", "-i", str(files[0]), "-t", str(int(seconds)), "-vn", "-ac", "2", "-ar", "44100",
+                         "-c:a", "pcm_s16le", str(tmp)], timeout=90, capture_stdout=False)
+        if r.returncode == 0 and _wav_ok(tmp):
+            return True, ""
+        return False, f"2차 rc={r.returncode} {ffmpeg._tail(r.stderr, 6)}"
+    finally:
+        _sh.rmtree(work_dir, ignore_errors=True)
 
 
 def download_audio(url, out_dir, progress_cb=None, cancel_event: threading.Event = None):

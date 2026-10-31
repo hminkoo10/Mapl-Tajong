@@ -32,5 +32,9 @@ jobs:
           mv build/bin/bgutil-pot-linux-x86_64 build/bin/bgutil-pot
           chmod +x build/bin/bgutil-pot
           build/bin/bgutil-pot --version
-      - name: Probe
+      - name: Probe (imageio-ffmpeg)
         run: python tools/yt_probe.py
+      - name: Probe (system ffmpeg)
+        run: |
+          sudo apt-get install -y -qq ffmpeg > /dev/null
+          MAPL_FFMPEG=/usr/bin/ffmpeg python tools/yt_probe.py

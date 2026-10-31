@@ -2,6 +2,7 @@
 
 우선순위: exe 옆/번들 폴더 → imageio-ffmpeg 패키지 → PATH
 """
+import os
 import re
 import shutil
 import subprocess
@@ -21,6 +22,9 @@ class FfmpegError(RuntimeError):
 @lru_cache(maxsize=1)
 def ffmpeg_exe():
     name = "ffmpeg.exe" if _IS_WIN else "ffmpeg"
+    env = os.environ.get("MAPL_FFMPEG")   # 시험용으로 다른 ffmpeg를 쓸 때
+    if env and Path(env).exists():
+        return env
     cands = []
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).parent
