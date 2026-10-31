@@ -1,12 +1,19 @@
 # 데스크톱(Windows) 배포
-# desktop-v2.0.1 처럼 태그를 올리면: exe 빌드 → 설치 파일 생성 → GitHub Release에 올림
+# 다음 중 하나를 하면: exe 빌드 → 설치 파일 생성 → GitHub Release(태그 desktop-vX.Y.Z)에 올림
+#   - desktop-v2.0.1 태그 올리기
+#   - release/desktop-v2.0.1 브랜치 만들기 (GitHub 웹에서 브랜치만 만들어도 됨)
 # 설치된 프로그램은 이 Release의 MaplTajong-Setup-x.y.z.exe 를 찾아 자동으로 업데이트한다.
 name: Desktop release
 
 on:
   push:
     tags: ["desktop-v*"]
+    branches: ["release/desktop-v*"]
   workflow_dispatch:
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -28,12 +35,15 @@ jobs:
           text = open("app/core/version.py", encoding="utf-8").read()
           version = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', text).group(1)
           ref = os.environ.get("GITHUB_REF", "")
-          if ref.startswith("refs/tags/"):
-              tag = ref.split("/", 2)[2]
-              if tag != f"desktop-v{version}":
-                  raise SystemExit(f"태그({tag})와 app/core/version.py 의 버전({version})이 달라요.")
+          publish = False
+          for prefix in ("refs/tags/", "refs/heads/release/"):
+              if ref.startswith(prefix):
+                  name = ref[len(prefix):]
+                  if name != f"desktop-v{version}":
+                      raise SystemExit(f"{name} 와 app/core/version.py 의 버전({version})이 달라요.")
+                  publish = True
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
-              f.write(f"VERSION={version}\n")
+              f.write(f"VERSION={version}\nPUBLISH={'1' if publish else '0'}\n")
 
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
@@ -62,10 +72,10 @@ jobs:
           path: dist/installer/*
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: env.PUBLISH == '1'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/installer/MaplTajong-Setup-*.exe dist/installer/*.sha256 \
-            --title "마고 타종 ${VERSION} (Windows)" --notes-file release_notes.md
+          gh release create "desktop-v${VERSION}" dist/installer/MaplTajong-Setup-*.exe dist/installer/*.sha256 \
+            --target "$GITHUB_SHA" --title "마고 타종 ${VERSION} (Windows)" --notes-file release_notes.md
