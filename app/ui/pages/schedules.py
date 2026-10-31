@@ -7,7 +7,7 @@ from app.data import repo
 from app.ui import icons
 from app.ui.dialogs import BatchEditDialog, DuplicateDialog, ScheduleDialog, ask_text, confirm, notify
 from app.ui.select import Menu, Select
-from app.ui.tables import PillDelegate, SmartTable, TextDelegate
+from app.ui.tables import PillDelegate, SmartTable, TextDelegate, TimeDelegate
 from app.ui.theme import C, font, qc
 from app.ui.widgets import Button, PageHeader, SegmentedControl, _anim, ease_out_cubic, page_field
 
@@ -142,11 +142,11 @@ class SchedulesPage(QWidget):
         root.addLayout(bar)
 
         self.table = SmartTable(["", "시간", "이름", "요일", "종소리", "음량", "상태"], check_col=True)
-        self.table.setItemDelegateForColumn(1, TextDelegate(self.table, bold=True, px=15))
+        self.table.setItemDelegateForColumn(1, TimeDelegate(self.table))
         self.table.setItemDelegateForColumn(2, TextDelegate(self.table, px=15))
         self.table.setItemDelegateForColumn(6, PillDelegate(self.table))
         hdr = self.table.horizontalHeader()
-        for c, w in ((1, 90), (3, 120), (5, 80), (6, 84)):
+        for c, w in ((1, 104), (3, 120), (5, 80), (6, 84)):
             hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Fixed)
             self.table.setColumnWidth(c, w)
         hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
@@ -201,7 +201,7 @@ class SchedulesPage(QWidget):
 
     # ---------------- 데이터 ----------------
     def _on_data_changed(self, what):
-        if what in ("all", "sets"):
+        if what in ("all", "sets", "schedules"):
             self.refresh_sets()
         if what in ("all", "sets", "schedules", "sounds"):
             self.refresh()

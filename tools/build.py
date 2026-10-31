@@ -94,6 +94,16 @@ def find_deno():
     return Path(w) if w else None
 
 
+def find_pot():
+    """YouTube 봇 확인을 통과하는 증명값(PO 토큰) 생성기 bgutil-pot.
+    CI가 build/bin 에 받아 두고(체크섬 확인), 직접 빌드할 때는 BGUTIL_POT 로 위치를 알려 줄 수 있다."""
+    name = "bgutil-pot.exe" if os.name == "nt" else "bgutil-pot"
+    for c in (os.environ.get("BGUTIL_POT"), BUILD / "bin" / name, shutil.which("bgutil-pot")):
+        if c and Path(c).is_file():
+            return Path(c)
+    return None
+
+
 # 쓰지 않는 Qt 파일 (_internal 기준). 설치 파일과 업데이트 크기를 줄인다.
 PRUNE = [
     "PyQt6/Qt6/translations",
@@ -148,6 +158,8 @@ def build_exe(version, icon, need_deno=True):
         "--paths", ROOT,
         "--add-data", f"{ROOT / 'app' / 'assets'}{sep}assets",
         "--add-data", f"{ROOT / 'app' / 'data' / 'schema.sql'}{sep}app/data",
+        "--add-data", f"{ROOT / 'CHANGELOG.md'}{sep}.",
+        "--add-data", f"{ROOT / 'THIRD_PARTY_NOTICES.md'}{sep}.",
         "--exclude-module", "tkinter",
         "--collect-all", "imageio_ffmpeg",
         "--collect-all", "yt_dlp",
@@ -161,6 +173,15 @@ def build_exe(version, icon, need_deno=True):
         print(f"deno 포함: {deno}", flush=True)
     elif need_deno:
         sys.exit("deno 를 찾지 못했어요. 'pip install deno' 후 다시 빌드해 주세요. (YouTube 받기에 필요)")
+    pot = find_pot()
+    if pot:
+        if pot.name != ("bgutil-pot.exe" if os.name == "nt" else "bgutil-pot"):
+            sys.exit(f"{pot} 의 이름을 bgutil-pot(.exe) 로 바꿔 주세요.")
+        args += ["--add-binary", f"{pot}{sep}."]
+        print(f"bgutil-pot 포함: {pot}", flush=True)
+    elif need_deno:
+        sys.exit("bgutil-pot 을 찾지 못했어요. build/bin 에 넣거나 BGUTIL_POT 로 알려 주세요. "
+                 "(--no-deno 로 YouTube 구성 요소 없이 빌드할 수 있어요)")
     args.append(ROOT / "app" / "main.py")
     run(args)
     exe = DIST / "Mataf" / ("Mataf.exe" if os.name == "nt" else "Mataf")

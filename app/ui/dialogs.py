@@ -6,8 +6,9 @@ from PyQt6.QtGui import QPainter
 from PyQt6.QtWidgets import (QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                              QMainWindow, QScrollArea, QSlider, QSpinBox, QTimeEdit, QVBoxLayout, QWidget)
 
-from app.core.timeutil import mask_to_days
+from app.core.timeutil import ampm, mask_to_days
 from app.ui.select import Select
+from app.ui.timepicker import TimePicker
 from app.ui.theme import C, paint_soft_shadow, qc
 from app.ui.widgets import (Button, DayChips, IconButton, SegmentedControl, SlideBar, ToggleSwitch, _anim, field_label,
                             hline, muted_label)
@@ -272,19 +273,24 @@ class ScheduleDialog(BaseDialog):
         self.days = DayChips()
         self.body.addWidget(_row("요일", self.days))
 
-        trow = QHBoxLayout()
-        trow.setSpacing(6)
-        self.time_edit = QTimeEdit()
-        self.time_edit.setDisplayFormat("HH:mm")
+        tcol = QVBoxLayout()
+        tcol.setSpacing(10)
+        self.time_edit = TimePicker()
         self.time_edit.setTime(QTime(9, 0))
-        self.time_edit.setFixedWidth(120)
-        trow.addWidget(self.time_edit)
-        for txt, mins in (("-5분", -5), ("+5분", 5), ("+10분", 10)):
+        tcol.addWidget(self.time_edit)
+        qrow = QHBoxLayout()
+        qrow.setSpacing(6)
+        for txt, mins in (("-5분", -5), ("+5분", 5), ("+10분", 10), ("+1시간", 60)):
             b = Button(txt, variant="secondary", size="sm")
-            b.clicked.connect(lambda _=False, m=mins: self.time_edit.setTime(self.time_edit.time().addSecs(m * 60)))
-            trow.addWidget(b)
-        trow.addStretch(1)
-        self.body.addWidget(_row("시간", trow))
+            b.clicked.connect(lambda _=False, m=mins: self.time_edit.add_minutes(m))
+            qrow.addWidget(b)
+        hint = QLabel("칸을 누르고 숫자를 바로 쳐도 돼요")
+        hint.setStyleSheet(f"color: {C.grey500}; font-size: 12.5px;")
+        qrow.addSpacing(6)
+        qrow.addWidget(hint)
+        qrow.addStretch(1)
+        tcol.addLayout(qrow)
+        self.body.addWidget(_row("시간", tcol))
 
         srow = QHBoxLayout()
         srow.setSpacing(6)
@@ -390,7 +396,7 @@ class BatchEditDialog(BaseDialog):
         self.rows = rows
         self.btn_ok.setText("바꾸기")
 
-        names = ", ".join(f"{r['time_hhmm']} {r['name']}" for r in rows[:4]) + (f" 외 {n - 4}개" if n > 4 else "")
+        names = ", ".join(f"{ampm(r['time_hhmm'])} {r['name']}" for r in rows[:4]) + (f" 외 {n - 4}개" if n > 4 else "")
         preview = QLabel(names)
         preview.setWordWrap(True)
         preview.setStyleSheet(f"color: {C.grey700}; font-size: 13px; background: {C.grey50};"

@@ -53,3 +53,21 @@ def format_remaining(seconds, short=False):
     if hours > 0:
         return f"{hours}:{minutes:02d}:{secs:02d}"
     return f"{minutes:02d}:{secs:02d}"
+
+
+def ampm(hhmm):
+    """'14:05' → '오후 2:05', '00:30' → '오전 12:30'. datetime/time 도 받는다."""
+    if hasattr(hhmm, "hour"):
+        h, m = hhmm.hour, hhmm.minute
+    else:
+        hs, ms = str(hhmm).split(":")[:2]
+        h, m = int(hs), int(ms)
+    part = "오전" if h < 12 else "오후"
+    h12 = h % 12 or 12
+    return f"{part} {h12}:{m:02d}"
+
+
+def ampm_parts(hhmm):
+    """('오후', '2:05')"""
+    a, b = ampm(hhmm).split(" ", 1)
+    return a, b

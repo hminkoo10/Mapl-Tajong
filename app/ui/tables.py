@@ -116,6 +116,32 @@ class TextDelegate(_Base):
         p.restore()
 
 
+class TimeDelegate(_Base):
+    """'14:05' → 작게 '오후' + 굵게 '2:05'."""
+
+    def paint(self, p, opt, idx):
+        text = self._bg(p, opt, idx)
+        try:
+            h, m = (int(x) for x in str(text).split(":")[:2])
+        except ValueError:
+            return
+        p.save()
+        col = idx.data(Qt.ItemDataRole.ForegroundRole)
+        main = col.color() if col is not None else QColor(C.grey900)
+        x = opt.rect.left() + 12
+        r = QRect(x, opt.rect.top(), opt.rect.width() - 18, opt.rect.height())
+        part = "오전" if h < 12 else "오후"
+        p.setFont(font(12.5, QFont.Weight.Medium))
+        p.setPen(QColor(C.grey400) if main.name().lower() == QColor(C.grey400).name() else QColor(C.grey500))
+        p.drawText(r, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, part)
+        pw = p.fontMetrics().horizontalAdvance(part) + 5
+        p.setFont(font(15, QFont.Weight.DemiBold))
+        p.setPen(main)
+        p.drawText(r.adjusted(pw, 0, 0, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                   f"{h % 12 or 12}:{m:02d}")
+        p.restore()
+
+
 class SmartTable(QTableWidget):
     selectionCountChanged = pyqtSignal(int)
 

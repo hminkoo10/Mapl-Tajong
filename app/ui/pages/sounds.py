@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QHeaderView, QLabel, QVBoxLayout, QWidget
 
@@ -10,6 +12,7 @@ from app.ui.sound_editor import open_editor_for_sound
 from app.ui.tables import PillDelegate, SmartTable, TextDelegate
 from app.ui.theme import C
 from app.ui.widgets import Button, EqualizerBars, IconButton, PageHeader
+from app.ui.workers import run_async
 from app.ui.youtube_dialog import YoutubeDialog
 
 
@@ -94,15 +97,18 @@ class SoundsPage(QWidget):
         t.setUpdatesEnabled(False)
         t.blockSignals(True)
         t.setRowCount(len(sounds))
+        unknown = []
         for i, s in enumerate(sounds):
             sid = int(s["id"])
             path = sound_file_path(str(s["file_name"]))
             exists = path.exists()
-            dur = sound_files.sound_duration(path) if exists else None
+            dur = sound_files.cached_duration(path) if exists else None
+            if exists and dur is None:
+                unknown.append((sid, str(path)))
             t.set_cell(i, 0, "")
             t.set_row_id(i, sid)
             t.set_cell(i, 1, str(s["name"]), fg=C.grey900 if exists else C.danger)
-            t.set_cell(i, 2, sound_files.format_duration(dur), fg=C.grey600)
+            t.set_cell(i, 2, "…" if exists and dur is None else sound_files.format_duration(dur), fg=C.grey600)
             t.set_cell(i, 3, f"{int(round(float(s['volume']) * 100))}%", fg=C.grey600)
             n = usage.get(sid, 0)
             t.set_cell(i, 4, "", data=(f"일정 {n}개", C.accent_text, C.accent_softer) if n
@@ -116,6 +122,22 @@ class SoundsPage(QWidget):
         t.select_ids(keep[:1])
         self.footer.setText(f"{len(sounds)}개 · 두 번 클릭하면 들어볼 수 있어요")
         self._sync_buttons()
+        if unknown:
+            # mp3 등은 길이를 읽는 데 시간이 걸릴 수 있어 화면을 멈추지 않도록 뒤에서 계산한다
+            self._dur_seq = getattr(self, "_dur_seq", 0) + 1
+            seq = self._dur_seq
+            run_async(lambda items: [(sid, sound_files.sound_duration(pth)) for sid, pth in items], unknown,
+                      on_done=lambda res: self._durations_ready(seq, res))
+
+    def _durations_ready(self, seq, results):
+        if seq != getattr(self, "_dur_seq", 0):
+            return
+        t = self.table
+        rows = {t.row_id(i): i for i in range(t.rowCount())}
+        for sid, dur in results:
+            r = rows.get(sid)
+            if r is not None:
+                t.set_cell(r, 2, sound_files.format_duration(dur), fg=C.grey600)
 
     def _selected(self):
         ids = self.table.selected_ids()
@@ -146,12 +168,19 @@ class SoundsPage(QWidget):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         name, path, vol = dlg.get_value()
-        try:
-            new_id = sound_files.add_sound_from_file(self.conn, path, name, vol)
-        except Exception as e:
-            notify(self, "추가하지 못했어요", str(e))
-            return
-        self._done(new_id, f"{name} 종소리를 추가했어요")
+        self.btn_add.setEnabled(False)
+        self.ctx.toast("종소리를 넣고 있어요")
+
+        def done(dst):
+            self.btn_add.setEnabled(True)
+            new_id = repo.insert_sound(self.conn, (name or Path(path).stem).strip(), Path(dst).name, float(vol))
+            self._done(new_id, f"{name} 종소리를 추가했어요")
+
+        def fail(msg):
+            self.btn_add.setEnabled(True)
+            notify(self, "추가하지 못했어요", msg)
+
+        run_async(sound_files.import_file, path, on_done=done, on_fail=fail)
 
     def on_editor(self):
         s = self._selected()

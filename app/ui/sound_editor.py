@@ -656,21 +656,46 @@ class SoundEditorDialog(BaseDialog):
             return
         self.btn_ok.setEnabled(False)
         self.btn_ok.setText("저장 중…")
-        try:
+        self.btn_cancel.setEnabled(False)
+        self._saving = True
+        row = self.sound_row
+        src = self.src
+
+        # 소리 만들기는 오래 걸릴 수 있어 작업 스레드에서, 파일 교체와 기록은 화면 스레드에서 한다
+        def work():
             if overwrite:
+                return sound_files.render_edit_temp(row, params, dur)
+            return sound_files.render_edit_new(src, params, dur, name)
+
+        def done(path):
+            try:
                 from app.data import repo
-                sound_files.overwrite_with_edit(self.ctx.conn, self.ctx.player, self.sound_row, params, dur)
-                repo.update_sound(self.ctx.conn, int(self.sound_row["id"]), name, float(self.sound_row["volume"]))
-                self.result_id = int(self.sound_row["id"])
-            else:
-                vol = float(self.sound_row["volume"]) if self.sound_row is not None else 1.0
-                self.result_id = sound_files.save_edit_as_new(self.ctx.conn, self.src, params, dur, name, vol)
-        except Exception as e:
-            self.btn_ok.setEnabled(True)
-            self.btn_ok.setText("저장")
-            self.show_error("저장하지 못했어요: " + str(e)[-200:])
-            return
-        self.accept()
+                if overwrite:
+                    sound_files.commit_overwrite(self.ctx.conn, self.ctx.player, row, path)
+                    repo.update_sound(self.ctx.conn, int(row["id"]), name, float(row["volume"]))
+                    self.result_id = int(row["id"])
+                else:
+                    vol = float(row["volume"]) if row is not None else 1.0
+                    self.result_id = repo.insert_sound(self.ctx.conn, name, Path(path).name, vol)
+            except RuntimeError:
+                return
+            except Exception as e:
+                fail(str(e))
+                return
+            self._saving = False
+            self.accept()
+
+        def fail(msg):
+            try:
+                self._saving = False
+                self.btn_ok.setEnabled(True)
+                self.btn_ok.setText("저장")
+                self.btn_cancel.setEnabled(True)
+                self.show_error("저장하지 못했어요: " + str(msg)[-200:])
+            except RuntimeError:
+                pass
+
+        run_async(work, on_done=done, on_fail=fail)
 
     def _restore(self):
         if not confirm(self, "원본으로 되돌릴까요?", "처음 넣었던 소리로 돌아가요.", "되돌리기", danger=False):
@@ -680,6 +705,11 @@ class SoundEditorDialog(BaseDialog):
         self.result_id = int(self.sound_row["id"])
         self.ctx.toast("원본으로 되돌렸어요", "success")
         self.accept()
+
+    def reject(self):
+        if getattr(self, "_saving", False):
+            return
+        super().reject()
 
     def done(self, r):
         self._stop()

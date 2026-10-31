@@ -3,7 +3,7 @@ import threading
 import time
 from pathlib import Path
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QScrollArea, QSizePolicy,
                              QVBoxLayout, QWidget)
@@ -11,11 +11,18 @@ from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QLineEdit, QProgressB
 from app.core import ffmpeg, sound_files, youtube
 from app.core.paths import download_tmp_dir
 from app.ui import icons
-from app.ui.dialogs import BaseDialog
+from app.data import repo
+from app.ui.dialogs import BaseDialog, confirm
+from app.ui.select import Menu
 from app.ui.sound_editor import SoundEditorDialog
 from app.ui.theme import C, font, mix, qc
 from app.ui.widgets import Button, ChipButton, Spinner, TickingWidget, _anim, ease_out_cubic, ticker
 from app.ui.workers import DownloadThread, ThumbThread, keep_alive, run_async
+
+class _Status(QObject):
+    """작업 스레드에서 보낸 진행 문구를 화면 스레드로 넘긴다."""
+    text = pyqtSignal(str)
+
 
 SUGGESTIONS = ["학교 종소리", "수업 시작종", "차임벨 효과음", "띵동댕동", "쉬는 시간 종", "알림음 효과음"]
 PREVIEW_SEC = 30
@@ -206,6 +213,9 @@ class YoutubeDialog(BaseDialog):
         self._pv_timer = QTimer(self)
         self._pv_timer.setInterval(300)
         self._pv_timer.timeout.connect(self._watch_preview)
+        self._retry = None
+        self._status = _Status(self)
+        self._status.text.connect(self._status_text)
 
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -254,6 +264,10 @@ class YoutubeDialog(BaseDialog):
         self.progress.setFixedWidth(220)
         self.progress.hide()
         sl.addWidget(self.progress)
+        self.btn_login = Button("브라우저 로그인으로 받기", variant="soft", size="sm")
+        self.btn_login.hide()
+        self.btn_login.clicked.connect(self._offer_login)
+        sl.addWidget(self.btn_login)
         self.btn_cancel_dl = Button("취소", variant="subtle", size="sm")
         self.btn_cancel_dl.hide()
         self.btn_cancel_dl.clicked.connect(self._cancel_download)
@@ -285,8 +299,24 @@ class YoutubeDialog(BaseDialog):
         QTimer.singleShot(0, self.query.setFocus)
 
     # ---------------- 상태 ----------------
-    def _set_state(self, text, busy=False, error=False):
+    def _browser(self):
+        return repo.get_setting(self.ctx.conn, "yt_cookie_browser", "") or None
+
+    def _status_text(self, text):
+        try:
+            if self.spinner.isVisible():
+                self._set_state(text, busy=True)
+        except RuntimeError:
+            pass
+
+    def _set_state(self, text, busy=False, error=False, retry=None):
+        self._retry = retry if error and youtube.is_blocked_message(text) else None
+        try:
+            self.btn_login.setVisible(self._retry is not None and bool(youtube.installed_browsers()))
+        except RuntimeError:
+            return
         self.state_label.setText(text)
+        self.state_label.setWordWrap(True)
         self.state_label.setStyleSheet(f"color: {C.danger if error else C.grey600}; font-weight: {600 if error else 400};")
         self.spinner.setVisible(busy)
 
@@ -406,7 +436,8 @@ class YoutubeDialog(BaseDialog):
         card.set_preview("loading")
         self._set_state("미리 듣기를 준비하고 있어요", busy=True)
         self._sync_preview_button()
-        run_async(youtube.preview_clip, card.data["url"], PREVIEW_SEC, self._pv_cancel,
+        run_async(youtube.preview_clip, card.data["url"], PREVIEW_SEC, self._pv_cancel, self._browser(),
+                  self._status.text.emit,
                   on_done=lambda path: self._preview_ready(seq, card, path),
                   on_fail=lambda msg: self._preview_failed(seq, card, msg))
 
@@ -430,7 +461,7 @@ class YoutubeDialog(BaseDialog):
             card.set_preview("idle")
             self._pv_card = None
             self._sync_preview_button()
-            self._set_state(msg, error=True)
+            self._set_state(msg, error=True, retry=lambda c=card: self.toggle_preview(c) if c in self.cards else None)
         except RuntimeError:
             pass
 
@@ -467,7 +498,7 @@ class YoutubeDialog(BaseDialog):
             return
         self.stop_preview()
         data = self.selected.data
-        self._dl = DownloadThread(data["url"], download_tmp_dir())
+        self._dl = DownloadThread(data["url"], download_tmp_dir(), self._browser())
         self._dl_edit = edit
         self._dl_title = data.get("title") or "YouTube 종소리"
         self._dl.progress.connect(self._dl_progress)
@@ -485,7 +516,7 @@ class YoutubeDialog(BaseDialog):
 
     def _dl_progress(self, frac, status):
         self.progress.setValue(int(frac * 1000))
-        self._set_state(f"{status} {int(frac * 100)}%", busy=True)
+        self._set_state(status if "시도" in status else f"{status} {int(frac * 100)}%", busy=True)
 
     def _dl_reset(self):
         self._dl = None
@@ -496,8 +527,9 @@ class YoutubeDialog(BaseDialog):
 
     def _dl_failed(self, msg):
         try:
+            edit = self._dl_edit
             self._dl_reset()
-            self._set_state(msg, error=True)
+            self._set_state(msg, error=True, retry=lambda: self.download(edit=edit))
         except RuntimeError:
             pass
 
@@ -539,6 +571,33 @@ class YoutubeDialog(BaseDialog):
             except OSError:
                 pass
         self.accept()
+
+    # ---------------- 브라우저 로그인 ----------------
+    def _offer_login(self):
+        found = youtube.installed_browsers()
+        if not found:
+            return
+        m = Menu(self)
+        cur = self._browser()
+        for key, label in found:
+            act = m.addAction(f"{label}{'  ✓' if key == cur else ''}")
+            act.setData(key)
+        chosen = m.exec(self.btn_login.mapToGlobal(self.btn_login.rect().bottomLeft()))
+        if not chosen:
+            return
+        key = str(chosen.data())
+        if not repo.get_setting(self.ctx.conn, "yt_cookie_ok", ""):
+            if not confirm(self, f"{youtube.browser_label(key)} 로그인 정보를 쓸까요?",
+                           "그 브라우저에 로그인된 YouTube 정보로 다시 받아요. 정보는 이 컴퓨터 안에서만 쓰고 "
+                           "다른 곳으로 보내지 않아요.\n설정 → YouTube 로그인에서 언제든 끌 수 있어요.",
+                           "사용하기", danger=False):
+                return
+            repo.set_setting(self.ctx.conn, "yt_cookie_ok", "1")
+        repo.set_setting(self.ctx.conn, "yt_cookie_browser", key)
+        retry, self._retry = self._retry, None
+        self.btn_login.hide()
+        if retry:
+            retry()
 
     def reject(self):
         self.stop_preview()

@@ -1,4 +1,5 @@
 """YouTube 검색 / 미리 듣기 / 오디오 다운로드 (yt-dlp)."""
+import os
 import re
 import shutil
 import sys
@@ -6,7 +7,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from app.core import ffmpeg
+from app.core import ffmpeg, ytpot
 from app.core.paths import app_data_dir, temp_dir
 
 
@@ -46,15 +47,19 @@ class _Logger:
     def __init__(self):
         self.errors = []
         self.warnings = []
+        self.pot = []
 
     def debug(self, msg):
-        pass
+        m = str(msg)
+        if "[pot" in m and len(self.pot) < 30:
+            self.pot.append(m[:200])
 
     def info(self, msg):
-        pass
+        self.debug(msg)
 
     def warning(self, msg):
         self.warnings.append(str(msg))
+        self.debug(msg)
 
     def error(self, msg):
         self.errors.append(str(msg))
@@ -102,6 +107,12 @@ def _js_runtimes():
     return rt or {"deno": {}}
 
 
+def _cache_dir():
+    d = app_data_dir() / "ytcache"
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d)
+
+
 def _base_opts(logger):
     return {
         "quiet": True,
@@ -111,25 +122,99 @@ def _base_opts(logger):
         "logger": logger,
         "socket_timeout": 15,
         "extractor_retries": 2,
+        "cachedir": _cache_dir(),
         "js_runtimes": _js_runtimes(),
     }
 
 
-# 기본 방식이 막히면 차례로 시도할 YouTube 접속 방식
-_CLIENT_FALLBACKS = [None, ["tv_simply", "tv"], ["web_embedded", "mweb"], ["android_vr"]]
+# ---------------- 브라우저 로그인 정보 ----------------
+BROWSERS = [
+    ("chrome", "Chrome"),
+    ("edge", "Microsoft Edge"),
+    ("whale", "네이버 웨일"),
+    ("firefox", "Firefox"),
+    ("brave", "Brave"),
+    ("opera", "Opera"),
+    ("vivaldi", "Vivaldi"),
+]
+
+
+def _browser_dirs(key):
+    home = Path.home()
+    if sys.platform == "win32":
+        local = Path(os.environ.get("LOCALAPPDATA") or home / "AppData" / "Local")
+        roaming = Path(os.environ.get("APPDATA") or home / "AppData" / "Roaming")
+        return {
+            "chrome": [local / "Google" / "Chrome" / "User Data"],
+            "edge": [local / "Microsoft" / "Edge" / "User Data"],
+            "whale": [local / "Naver" / "Naver Whale" / "User Data"],
+            "firefox": [roaming / "Mozilla" / "Firefox" / "Profiles"],
+            "brave": [local / "BraveSoftware" / "Brave-Browser" / "User Data"],
+            "opera": [roaming / "Opera Software" / "Opera Stable"],
+            "vivaldi": [local / "Vivaldi" / "User Data"],
+        }.get(key, [])
+    cfg = home / ".config"
+    return {
+        "chrome": [cfg / "google-chrome"],
+        "edge": [cfg / "microsoft-edge"],
+        "whale": [cfg / "naver-whale"],
+        "firefox": [home / ".mozilla" / "firefox", home / "snap" / "firefox" / "common" / ".mozilla" / "firefox"],
+        "brave": [cfg / "BraveSoftware" / "Brave-Browser"],
+        "opera": [cfg / "opera"],
+        "vivaldi": [cfg / "vivaldi"],
+    }.get(key, [])
+
+
+def installed_browsers():
+    """이 컴퓨터에 있는 브라우저 [(key, 이름)]."""
+    out = []
+    for key, label in BROWSERS:
+        if any(d.exists() for d in _browser_dirs(key)):
+            out.append((key, label))
+    return out
+
+
+def browser_label(key):
+    return dict(BROWSERS).get(key, key or "")
+
+
+# ---------------- 막혔을 때 다시 시도 ----------------
+BLOCKED_MSG = "YouTube가 이 컴퓨터의 자동 다운로드를 막았어요."
+BLOCKED_HINT = "브라우저에 로그인된 YouTube 정보로 다시 시도하면 대부분 받을 수 있어요."
+
+
+def is_blocked_message(msg):
+    return str(msg or "").startswith(BLOCKED_MSG)
 
 
 def _is_blocked(msg):
     low = msg.lower()
+    if any(k in low for k in ("private video", "video unavailable", "has been removed", "confirm your age",
+                              "age-restricted", "members-only", "join this channel")):
+        return False
     return any(k in low for k in ("sign in", "not a bot", "confirm you", "po token", "requested format is not available",
                                   "only images are available", "http error 403", "login required"))
+
+
+def _cookie_problem(msg):
+    """브라우저 로그인 정보를 읽다가 난 문제면 안내 문구, 아니면 None."""
+    low = str(msg or "").lower()
+    if "cookie" not in low and "decrypt" not in low and "dpapi" not in low:
+        return None
+    if "could not copy" in low or "permission denied" in low or "being used by another process" in low:
+        return "브라우저가 켜져 있어 로그인 정보를 읽지 못했어요. 그 브라우저 창을 모두 닫고 다시 해 보세요."
+    if "decrypt" in low or "app-bound" in low or "app bound" in low or "dpapi" in low or "v20" in low:
+        return "이 브라우저의 로그인 정보는 읽을 수 없어요. 설정에서 다른 브라우저(Edge, 웨일, Firefox 등)를 골라 주세요."
+    if "could not find" in low or "no such file" in low or "does not exist" in low:
+        return "그 브라우저에서 로그인 정보를 찾지 못했어요. 브라우저에서 YouTube에 로그인한 뒤 다시 해 보세요."
+    return None
 
 
 def _friendly(e, logger):
     msg = str(e) or (logger.errors[-1] if logger.errors else "")
     low = msg.lower()
     if "not a bot" in low or ("confirm you" in low and "bot" in low):
-        return "YouTube가 자동 다운로드를 잠깐 막았어요. 잠시 뒤 다시 해 보거나 다른 영상을 골라 주세요."
+        return f"{BLOCKED_MSG} {BLOCKED_HINT}"
     if "confirm your age" in low or "age-restricted" in low or "inappropriate for some users" in low:
         return "연령 제한이 있는 영상이라 받을 수 없어요."
     if "members-only" in low or "join this channel" in low:
@@ -142,32 +227,69 @@ def _friendly(e, logger):
         return "인터넷 연결을 확인해 주세요."
     if "max_filesize" in low or "larger than max" in low:
         return "파일이 너무 커요. 더 짧은 영상을 골라 주세요."
-    if "sign in" in low:
-        return "로그인해야 볼 수 있는 영상이라 받을 수 없어요."
+    if _is_blocked(msg):
+        return f"{BLOCKED_MSG} {BLOCKED_HINT}"
     return "YouTube에서 가져오지 못했어요. 잠시 뒤 다시 해 보세요."
 
 
-def _run_with_fallback(m, base, logger, work, cancel_event=None):
+def _strategies(browser=None):
+    """디스코드 음악 봇들이 쓰는 순서대로: 기본 → (로그인) → 증명값(PO 토큰)을 붙인 웹 접속 → TV 접속."""
+    pot = ytpot.register()
+    out = [("기본", None, None)]
+    if browser:
+        out.append(("로그인", {"fetch_pot": ["always"]} if pot else None, browser))
+    if pot:
+        out.append(("증명값-web", {"player_client": ["web_safari", "web"], "fetch_pot": ["always"]}, None))
+        out.append(("증명값-mweb", {"player_client": ["mweb"], "fetch_pot": ["always"]}, None))
+    out.append(("tv", {"player_client": ["tv", "web_embedded"]}, None))
+    return out
+
+
+def _run_with_fallback(m, base, logger, work, cancel_event=None, browser=None, status_cb=None):
     """work(opts) 를 기본 방식으로 해 보고, 막히면 다른 접속 방식으로 다시 시도."""
     last = None
-    for clients in _CLIENT_FALLBACKS:
+    cookie_msg = None
+    plan = _strategies(browser)
+    for i, (label, yt_args, cookies_from) in enumerate(plan):
         if cancel_event is not None and cancel_event.is_set():
             raise Cancelled("취소했어요.")
+        if i and status_cb:
+            status_cb(f"다른 방법으로 다시 시도하는 중 ({i + 1}/{len(plan)})")
         opts = dict(base)
-        if clients:
-            opts["extractor_args"] = {"youtube": {"player_client": clients}}
+        if yt_args:
+            opts["extractor_args"] = {"youtube": yt_args}
+        if cookies_from:
+            opts["cookiesfrombrowser"] = (cookies_from,)
+        logger.errors.clear()
+        logger.pot.clear()
         try:
-            return work(opts)
+            result = work(opts)
+            if i:
+                _log("성공", label)
+            return result
         except m.utils.DownloadCancelled:
             raise Cancelled("취소했어요.")
+        except Cancelled:
+            raise
         except Exception as e:
             if cancel_event is not None and cancel_event.is_set():
                 raise Cancelled("취소했어요.")
+            pot = [m for m in logger.pot if "mapl-bgutil" in m or "PO" in m]
+            _log(f"실패({label})", f"{e}" + (f" | 증명값: {pot[-1]}" if pot else ""))
+            if cookies_from:
+                cookie_msg = _cookie_problem(e) or cookie_msg
+                if cookie_msg:
+                    continue
             last = e
-            _log("실패" + (f"({','.join(clients)})" if clients else "(기본)"), e)
             if not _is_blocked(str(e)):
                 break
-    raise YoutubeError(_friendly(last, logger))
+    if cookie_msg and (last is None or _is_blocked(str(last))):
+        raise YoutubeError(cookie_msg)
+    msg = _friendly(last, logger)
+    if browser and is_blocked_message(msg):
+        msg = (f"{BLOCKED_MSG} {browser_label(browser)} 로그인 정보로도 받지 못했어요. "
+               "그 브라우저에서 YouTube에 로그인되어 있는지 확인하거나 잠시 뒤 다시 해 보세요.")
+    raise YoutubeError(msg)
 
 
 def _thumb(entry):
@@ -246,7 +368,7 @@ def probe(url):
     return [_entry(e, url)]
 
 
-def preview_clip(url, seconds=30, cancel_event: threading.Event = None):
+def preview_clip(url, seconds=30, cancel_event: threading.Event = None, browser=None, status_cb=None):
     """미리 듣기: 영상 소리의 앞부분만 받아 wav로. 같은 영상은 다시 받지 않는다."""
     m = _yt_dlp()
     if not m:
@@ -270,7 +392,7 @@ def preview_clip(url, seconds=30, cancel_event: threading.Event = None):
             raise YoutubeError("requested format is not available")
         return stream, info.get("http_headers") or {}
 
-    stream, headers = _run_with_fallback(m, base, logger, work, cancel_event)
+    stream, headers = _run_with_fallback(m, base, logger, work, cancel_event, browser, status_cb)
     if cancel_event is not None and cancel_event.is_set():
         raise Cancelled("취소했어요.")
     hdr = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
@@ -291,7 +413,7 @@ def preview_clip(url, seconds=30, cancel_event: threading.Event = None):
     return out
 
 
-def download_audio(url, out_dir, progress_cb=None, cancel_event: threading.Event = None):
+def download_audio(url, out_dir, progress_cb=None, cancel_event: threading.Event = None, browser=None):
     """오디오만 받아 mp3로 변환. (최종 파일 경로, 제목)을 반환."""
     m = _yt_dlp()
     if not m:
@@ -331,7 +453,8 @@ def download_audio(url, out_dir, progress_cb=None, cancel_event: threading.Event
         with m.YoutubeDL(opts) as ydl:
             return ydl.extract_info(url, download=True)
 
-    info = _run_with_fallback(m, base, logger, work, cancel_event)
+    status = (lambda text: progress_cb(0.0, text)) if progress_cb else None
+    info = _run_with_fallback(m, base, logger, work, cancel_event, browser, status)
 
     path = None
     for rd in (info or {}).get("requested_downloads") or []:

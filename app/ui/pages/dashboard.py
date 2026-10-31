@@ -5,7 +5,7 @@ from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter
 from PyQt6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from app.core.paths import sound_file_path
-from app.core.timeutil import format_remaining
+from app.core.timeutil import ampm, ampm_parts, format_remaining
 from app.data import repo
 from app.ui.select import Select
 from app.ui.theme import C, font, qc
@@ -31,7 +31,7 @@ STATUS = {
 
 def when_text(dt, now=None):
     now = now or datetime.now()
-    hm = dt.strftime("%H:%M")
+    hm = ampm(dt)
     d = (dt.date() - now.date()).days
     if d == 0:
         return f"오늘 {hm}"
@@ -52,6 +52,7 @@ def remain_words(sec):
 
 
 UNDOABLE = {"will_skip": "SKIP_ONCE", "rang_early": "FIRED_ONCE"}
+UNDO_LABEL = {"will_skip": "울리기", "rang_early": "제때 울리기"}
 
 
 class TodayList(TickingWidget):
@@ -94,12 +95,22 @@ class TodayList(TickingWidget):
         i = int(y // self.ROW_H)
         return i if 0 <= i < len(self.events) else -1
 
+    def _button_rect(self, i, label=None):
+        ev = self.events[i]
+        label = label or UNDO_LABEL.get(ev["status"], "")
+        fm = QFontMetricsF(font(13, QFont.Weight.Bold))
+        w = fm.horizontalAdvance(label) + 26
+        top = i * self.ROW_H
+        return QRectF(self.width() - w - 10, top + (self.ROW_H - 32) / 2, w, 32)
+
     def mouseMoveEvent(self, e):
         i = self._row_at(e.position().y())
         undoable = i >= 0 and self.events[i]["status"] in UNDOABLE
+        on_btn = undoable and self._button_rect(i).contains(e.position())
         self.setCursor(Qt.CursorShape.PointingHandCursor if undoable else Qt.CursorShape.ArrowCursor)
-        if i != self._hover:
+        if i != self._hover or on_btn != getattr(self, "_on_btn", False):
             self._hover = i
+            self._on_btn = on_btn
             self.update()
 
     def leaveEvent(self, e):
@@ -146,16 +157,46 @@ class TodayList(TickingWidget):
             p.setBrush(qc(C.accent_softer if nxt else C.grey50))
             p.drawRoundedRect(r, 12, 12)
 
+        # 시각: 작은 '오전/오후' + 굵은 '2:40'
+        part, hm = ampm_parts(ev["time"])
+        p.setPen(qc(C.grey400 if past else (C.accent if nxt else C.grey500)))
+        p.setFont(font(11.5, QFont.Weight.DemiBold))
+        p.drawText(QRectF(14, r.top() + 7, 60, 18), Qt.AlignmentFlag.AlignVCenter, part)
         p.setPen(qc(C.grey400 if past else (C.accent if nxt else C.grey900)))
         p.setFont(font(15, QFont.Weight.DemiBold))
-        p.drawText(QRectF(14, r.top(), 56, r.height()), Qt.AlignmentFlag.AlignVCenter, ev["time"])
+        p.drawText(QRectF(14, r.top() + 24, 60, 22), Qt.AlignmentFlag.AlignVCenter, hm)
 
-        tx = 76
+        tx = 78
         label, col = STATUS.get(st, STATUS["upcoming"])
         if nxt:
             label = remain_words((ev["run_at"] - now).total_seconds())
-        elif undoable and hovered:
-            label, col = "되돌리기", C.accent
+        if undoable:
+            # 꺼 둔 종: 오른쪽에 늘 보이는 '울리기' 버튼, 상태는 아래 줄에
+            btn = self._button_rect(int(top // self.ROW_H))
+            on_btn = hovered and getattr(self, "_on_btn", False)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(qc(C.accent if on_btn else C.accent_soft))
+            p.drawRoundedRect(btn, 10, 10)
+            p.setPen(qc("#FFFFFF" if on_btn else C.accent_text))
+            p.setFont(font(13, QFont.Weight.Bold))
+            p.drawText(btn, Qt.AlignmentFlag.AlignCenter, UNDO_LABEL[st])
+            tw = btn.left() - tx - 10
+            p.setPen(qc(C.grey400))
+            p.setFont(font(15, QFont.Weight.Medium))
+            p.drawText(QRectF(tx, r.top() + 7, tw, 22), Qt.AlignmentFlag.AlignVCenter,
+                       QFontMetricsF(p.font()).elidedText(ev["name"], Qt.TextElideMode.ElideRight, tw))
+            p.setFont(font(12.5, QFont.Weight.DemiBold))
+            p.setPen(QColor(col))
+            fm = QFontMetricsF(p.font())
+            lw = fm.horizontalAdvance(label)
+            p.drawText(QRectF(tx, r.top() + 28, lw + 2, 18), Qt.AlignmentFlag.AlignVCenter, label)
+            p.setPen(qc(C.grey400))
+            p.setFont(font(12.5))
+            p.drawText(QRectF(tx + lw + 6, r.top() + 28, max(0, tw - lw - 6), 18), Qt.AlignmentFlag.AlignVCenter,
+                       QFontMetricsF(p.font()).elidedText(f"· {ev['sound']}", Qt.TextElideMode.ElideRight,
+                                                          max(0, tw - lw - 6)))
+            return
+
         p.setFont(font(13, QFont.Weight.DemiBold))
         lw = QFontMetricsF(p.font()).horizontalAdvance(label)
         tw = w - tx - lw - 30
@@ -483,7 +524,7 @@ class DashboardPage(QWidget):
         self.ctx.changed("schedules")
         if ev:
             date = ev.run_at.strftime("%Y-%m-%d")
-            self.ctx.toast(f"{ev.run_at.strftime('%H:%M')} {ev.name} 종은 이번에 건너뛸게요", "info", 6000, "되돌리기",
+            self.ctx.toast(f"{ampm(ev.run_at)} {ev.name} 종은 이번에 건너뛸게요", "info", 6000, "되돌리기",
                            lambda: self._undo(ev.schedule_id, date, "SKIP_ONCE"))
 
     def on_undo(self, item):

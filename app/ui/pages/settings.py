@@ -2,13 +2,15 @@ from datetime import datetime
 
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QProgressBar, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QProgressBar, QScrollArea, QVBoxLayout, QWidget
 
-from app.core import backup, ffmpeg, youtube
+from app.core import backup, ffmpeg, weather, youtube, ytpot
 from app.core.paths import app_data_dir
 from app.core.startup import disable_startup, enable_startup, is_startup_enabled, is_supported
 from app.core.version import APP_VERSION, DEVELOPER
+from app.data import repo
 from app.ui.dialogs import confirm, notify
+from app.ui.select import Select
 from app.ui.theme import C
 from app.ui.widgets import Button, Card, PageHeader, ToggleSwitch, hline
 
@@ -74,6 +76,37 @@ class SettingsPage(QWidget):
         gen.body.addWidget(_row("컴퓨터를 켜면 자동으로 실행", "트레이에서 조용히 시작해요.", self.chk_startup))
         left.addWidget(gen)
 
+        fs = Card(padding=24)
+        fs.body.setSpacing(0)
+        fs.body.addWidget(_title("전체화면 시계"))
+        fs.body.addSpacing(6)
+        self.chk_weather = ToggleSwitch("")
+        self.chk_weather.setChecked(repo.get_setting(self.conn, "weather_on", "1") != "0")
+        self.chk_weather.toggled.connect(self._on_weather_toggle)
+        fs.body.addWidget(_row("날씨 예보 보이기", "지금 날씨와 앞으로 몇 시간의 예보를 함께 보여 줘요.", self.chk_weather))
+        fs.body.addWidget(hline())
+        self.weather_city = Select()
+        self.weather_city.setProperty("page", True)
+        for name, _, _ in weather.CITIES:
+            self.weather_city.addItem(name, name)
+        i = self.weather_city.findData(repo.get_setting(self.conn, "weather_city", weather.DEFAULT_CITY))
+        self.weather_city.setCurrentIndex(max(0, i))
+        self.weather_city.setMinimumWidth(120)
+        self.weather_city.currentIndexChanged.connect(self._on_weather_city)
+        self.weather_city.setEnabled(self.chk_weather.isChecked())
+        fs.body.addWidget(_row("날씨 지역", "가까운 도시를 골라 주세요.", self.weather_city))
+        fs.body.addWidget(hline())
+        self.fs_theme = Select()
+        self.fs_theme.setProperty("page", True)
+        self.fs_theme.addItem("어둡게", "dark")
+        self.fs_theme.addItem("밝게", "light")
+        self.fs_theme.setCurrentIndex(1 if repo.get_setting(self.conn, "fs_theme", "dark") == "light" else 0)
+        self.fs_theme.setMinimumWidth(120)
+        self.fs_theme.currentIndexChanged.connect(
+            lambda _i: repo.set_setting(self.conn, "fs_theme", self.fs_theme.currentData()))
+        fs.body.addWidget(_row("화면 밝기", "시계 화면에서 버튼이나 T 키로도 바꿀 수 있어요.", self.fs_theme))
+        left.addWidget(fs)
+
         bk = Card(padding=24)
         bk.body.setSpacing(0)
         bk.body.addWidget(_title("백업"))
@@ -107,13 +140,16 @@ class SettingsPage(QWidget):
         upd.body.addWidget(_row("자동으로 업데이트",
                                 "새 버전이 나오면 받아 두었다가, 다음 종까지 10분 넘게 남았을 때 조용히 설치해요.",
                                 self.chk_auto_update))
+        upd.body.addWidget(hline())
+        self.btn_history = Button("보기", variant="secondary")
+        upd.body.addWidget(_row("업데이트 기록", "버전마다 무엇이 바뀌었는지 볼 수 있어요.", self.btn_history))
         self.notes_row = QWidget()
         nl = QVBoxLayout(self.notes_row)
         nl.setContentsMargins(0, 0, 0, 0)
         nl.setSpacing(0)
         nl.addWidget(hline())
         self.btn_notes = Button("보기", variant="secondary")
-        nl.addWidget(_row("새로워진 점", "", self.btn_notes))
+        nl.addWidget(_row("새 버전에서 바뀌는 점", "", self.btn_notes))
         upd.body.addWidget(self.notes_row)
         self.notes_row.hide()
 
@@ -129,8 +165,25 @@ class SettingsPage(QWidget):
         info.body.addWidget(hline())
         yv = youtube.version()
         ready = bool(yv) and bool(youtube.deno_path())
+        pot = ytpot.available()
+        ready = ready and pot
         yt_text = "없음" if not yv else (f"{yv} · 준비됨" if ready else f"{yv} · 일부 영상 제한")
         info.body.addWidget(_row("YouTube (yt-dlp)", "", _value(yt_text, C.grey700 if ready else C.danger)))
+        info.body.addWidget(hline())
+        self.yt_login = Select()
+        self.yt_login.setProperty("page", True)
+        self.yt_login.addItem("사용 안 함", "")
+        cur = repo.get_setting(self.conn, "yt_cookie_browser", "")
+        found = youtube.installed_browsers()
+        if cur and cur not in dict(found):
+            found.append((cur, youtube.browser_label(cur)))
+        for key, label in found:
+            self.yt_login.addItem(label, key)
+        i = self.yt_login.findData(cur)
+        self.yt_login.setCurrentIndex(max(0, i))
+        self.yt_login.setMinimumWidth(150)
+        self.yt_login.currentIndexChanged.connect(self._on_yt_login)
+        info.body.addWidget(_row("YouTube 로그인", "막히면 이 브라우저의 로그인 정보로 받아요.", self.yt_login))
         info.body.addWidget(hline())
         self.btn_folder = Button("열기", variant="secondary")
         info.body.addWidget(_row("데이터 폴더", "", self.btn_folder))
@@ -141,12 +194,25 @@ class SettingsPage(QWidget):
         rcol.addWidget(info)
         rcol.addStretch(1)
         cols.addLayout(rcol, 2)
-        root.addLayout(cols, 1)
+        # 창이 작아도 잘리지 않도록 스크롤
+        holder = QWidget()
+        holder.setObjectName("settingsHolder")
+        holder.setStyleSheet("#settingsHolder { background: transparent; }")
+        hl = QVBoxLayout(holder)
+        hl.setContentsMargins(0, 0, 6, 4)
+        hl.addLayout(cols)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; } QScrollArea > QWidget > QWidget { background: transparent; }")
+        scroll.setWidget(holder)
+        root.addWidget(scroll, 1)
 
         self.btn_backup.clicked.connect(self.on_backup)
         self.btn_restore.clicked.connect(self.on_restore)
         self.btn_sched_csv.clicked.connect(self.on_sched_csv)
         self.btn_folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_data_dir()))))
+        self.btn_history.clicked.connect(self._show_history)
 
         self.um = ctx.updates
         if self.um is not None:
@@ -188,6 +254,27 @@ class SettingsPage(QWidget):
         if self.um.info is None:
             return
         notify(self, f"{self.um.info.version}에서 새로워진 점", notes_to_text(self.um.info.notes) or "-")
+
+    def _on_weather_toggle(self, on):
+        repo.set_setting(self.conn, "weather_on", "1" if on else "0")
+        self.weather_city.setEnabled(on)
+
+    def _on_weather_city(self, _i):
+        repo.set_setting(self.conn, "weather_city", self.weather_city.currentData())
+        self.ctx.toast(f"{self.weather_city.currentData()} 날씨를 보여 줄게요", "success")
+
+    def _show_history(self):
+        from app.ui.changelog_dialog import ChangelogDialog
+        ChangelogDialog(self).exec()
+
+    def _on_yt_login(self, _i):
+        key = self.yt_login.currentData() or ""
+        repo.set_setting(self.conn, "yt_cookie_browser", key)
+        if key:
+            repo.set_setting(self.conn, "yt_cookie_ok", "1")
+            self.ctx.toast(f"막히면 {youtube.browser_label(key)} 로그인 정보로 받아요", "success")
+        else:
+            self.ctx.toast("YouTube 로그인을 쓰지 않아요")
 
     def on_toggle_startup(self, on):
         try:

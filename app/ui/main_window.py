@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QSystemTrayIcon, QWidget
 from app.core.paths import asset_path
 from app.core.player import SoundPlayer
 from app.core.scheduler import Scheduler
+from app.core.timeutil import ampm
 from app.core.version import APP_TITLE, APP_VERSION, DEVELOPER
 from app.ui import icons
 from app.ui.context import AppContext
@@ -97,6 +98,10 @@ class MainWindow(QMainWindow):
         if not got:
             return
         version, notes = got
+        from app.ui.changelog_dialog import ChangelogDialog, notes_for
+        if notes_for(version):
+            ChangelogDialog(self, only_version=version, title=f"{version} 버전으로 업데이트했어요").exec()
+            return
         text = notes_to_text(notes) or "더 안정적으로 다듬었어요."
         notify(self, f"{version} 버전으로 업데이트했어요", text)
 
@@ -160,7 +165,7 @@ class MainWindow(QMainWindow):
         ev = self.scheduler.next_event
         nxt = (ev.run_at - datetime.now()).total_seconds() if ev else None
         self.player.idle_tick(nxt)
-        tip = f"Mapl Tajong\n다음: {ev.run_at.strftime('%H:%M')} {ev.name}" if ev else "Mapl Tajong\n예정된 종 없음"
+        tip = f"Mapl Tajong\n다음: {ampm(ev.run_at)} {ev.name}" if ev else "Mapl Tajong\n예정된 종 없음"
         if tip != self._tooltip:
             self._tooltip = tip
             self.tray.setToolTip(tip)

@@ -184,6 +184,25 @@ class Scheduler:
                 break
 
         self.next_event = best
+        self._warm_amplified(schedules)
+
+    def _warm_amplified(self, schedules):
+        """100%보다 크게 울릴 종소리는 미리 키워 둔다 (정시에 화면이 멈추지 않도록)."""
+        warm = getattr(self.player, "prepare_async", None)
+        if warm is None:
+            return
+        seen = set()
+        for s in schedules:
+            if int(s["enabled"]) != 1:
+                continue
+            vol = _volume_of(s)
+            key = (str(s["sound_file_name"]), round(vol, 3))
+            if vol > 1.0 and key not in seen:
+                seen.add(key)
+                try:
+                    warm(str(sound_file_path(key[0])), vol)
+                except Exception:
+                    pass
 
     def today_events(self):
         """대시보드 타임라인용: 오늘 울릴(울린) 일정과 상태."""

@@ -270,6 +270,21 @@ def _draw(name, p, color):
         _line(p, (12, 9.5), (12, 14))
         _fill(p, color)
         p.drawEllipse(QPointF(12, 16.8), 1.1, 1.1)
+    elif name == "sun":
+        p.drawEllipse(QPointF(12, 12), 4, 4)
+        import math
+        for i in range(8):
+            a = math.pi / 4 * i
+            _line(p, (12 + math.cos(a) * 7, 12 + math.sin(a) * 7), (12 + math.cos(a) * 9, 12 + math.sin(a) * 9))
+    elif name == "moon":
+        path = QPainterPath()
+        path.moveTo(19.5, 14.5)
+        path.cubicTo(18.2, 18.2, 14.4, 20.6, 10.4, 19.9)
+        path.cubicTo(5.6, 19.0, 2.8, 14.2, 4.3, 9.6)
+        path.cubicTo(5.2, 6.8, 7.6, 4.7, 10.4, 4.1)
+        path.cubicTo(8.6, 7.6, 9.6, 12.0, 12.8, 14.2)
+        path.cubicTo(14.9, 15.6, 17.4, 15.6, 19.5, 14.5)
+        p.drawPath(path)
     else:  # 알 수 없는 이름: 점
         _fill(p, color)
         p.drawEllipse(QPointF(12, 12), 3, 3)

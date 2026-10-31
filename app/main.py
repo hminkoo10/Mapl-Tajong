@@ -9,7 +9,7 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QGuiApplication, QIcon
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
@@ -17,6 +17,7 @@ from app.core.bootstrap import seed_if_empty
 from app.core.paths import APP_NAME, app_data_dir, asset_path, resource_path, ui_cache_dir
 from app.core.single_instance import acquire
 from app.core.startup import sync_startup_path
+from app.core.watchdog import HangWatch, enable_crash_log
 from app.data.db import connect, init_schema
 from app.ui.main_window import MainWindow
 from app.ui.theme import app_font, build_stylesheet, load_fonts
@@ -55,6 +56,7 @@ def _set_app_id():
 def main():
     _set_app_id()
     _install_excepthook()
+    enable_crash_log(app_data_dir())
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
@@ -84,7 +86,16 @@ def main():
     win = MainWindow(conn, app)
     win.resize(1240, 800)
     win.show()
-    sys.exit(app.exec())
+
+    watch = HangWatch(app_data_dir())
+    beat = QTimer()
+    beat.setInterval(1000)
+    beat.timeout.connect(watch.pulse)
+    beat.start()
+    watch.start()
+    code = app.exec()
+    watch.stop()
+    sys.exit(code)
 
 
 if __name__ == "__main__":

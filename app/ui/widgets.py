@@ -777,7 +777,8 @@ class CountdownRing(TickingWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawEllipse(center, rr, rr)
 
-        track = qc("#FFFFFF", 0.12) if self.on_dark else qc(C.grey100)
+        track = qc(self.track_color) if getattr(self, "track_color", None) else (
+            qc("#FFFFFF", 0.12) if self.on_dark else qc(C.grey100))
         p.setPen(QPen(track, th, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(rect)
