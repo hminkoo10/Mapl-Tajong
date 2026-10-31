@@ -1,0 +1,84 @@
+# 데스크톱(Windows) 배포
+# 다음 중 하나를 하면: exe 빌드 → 설치 파일 생성 → GitHub Release(태그 desktop-vX.Y.Z)에 올림
+#   - desktop-v2.0.1 태그 올리기
+#   - release/desktop-v2.0.1 브랜치 만들기 (GitHub 웹에서 브랜치만 만들어도 됨)
+# 설치된 프로그램은 이 Release의 MaplTajong-Setup-x.y.z.exe 를 찾아 자동으로 업데이트한다.
+name: Desktop release
+
+on:
+  push:
+    tags: ["desktop-v*"]
+    branches: ["release/desktop-v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read version
+        shell: python
+        run: |
+          import os, re
+          text = open("app/core/version.py", encoding="utf-8").read()
+          version = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', text).group(1)
+          ref = os.environ.get("GITHUB_REF", "")
+          publish = False
+          for prefix in ("refs/tags/", "refs/heads/release/"):
+              if ref.startswith(prefix):
+                  name = ref[len(prefix):]
+                  if name != f"desktop-v{version}":
+                      raise SystemExit(f"{name} 와 app/core/version.py 의 버전({version})이 달라요.")
+                  publish = True
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              f.write(f"VERSION={version}\nPUBLISH={'1' if publish else '0'}\n")
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller pillow
+
+      - name: Build
+        run: python tools/build.py
+
+      - name: Release notes
+        shell: python
+        run: |
+          import os, re
+          v = os.environ["VERSION"]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"^##\s*\[?{re.escape(v)}\]?[^\n]*\n(.*?)(?=^##\s|\Z)", text, re.M | re.S)
+          body = m.group(1).strip() if m else "더 안정적으로 다듬었어요."
+          open("release_notes.md", "w", encoding="utf-8").write(body + "\n")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MaplTajong-${{ env.VERSION }}
+          path: dist/installer/*
+
+      - name: Publish GitHub Release
+        if: env.PUBLISH == '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "desktop-v${VERSION}" dist/installer/MaplTajong-Setup-*.exe dist/installer/*.sha256 \
+            --target "$GITHUB_SHA" --title "마고 타종 ${VERSION} (Windows)" --notes-file release_notes.md

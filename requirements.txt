@@ -1,2 +1,4 @@
 PyQt6>=6.6
 pygame>=2.6
+yt-dlp[default]>=2026.10.26
+imageio-ffmpeg>=0.5

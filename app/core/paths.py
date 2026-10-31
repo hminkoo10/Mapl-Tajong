@@ -39,3 +39,24 @@ def amp_cache_dir():
 
 def resource_path(*parts):
     return base_dir().joinpath(*parts)
+
+def _sub_dir(name):
+    d = app_data_dir() / name
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def download_tmp_dir():
+    return _sub_dir("downloads")
+
+
+def originals_dir():
+    return _sub_dir("originals")
+
+
+def ui_cache_dir():
+    return _sub_dir("ui_cache")
+
+
+def temp_dir():
+    return _sub_dir("tmp")
