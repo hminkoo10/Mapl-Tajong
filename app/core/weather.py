@@ -4,6 +4,7 @@
 - 받은 내용은 파일로 보관해 인터넷이 잠깐 끊겨도 마지막 예보를 보여 준다.
 """
 import json
+import re
 import threading
 import time
 import urllib.error
@@ -109,12 +110,27 @@ _geo_lock = threading.Lock()
 _geo_last = [0.0]
 
 
-def search_places(query, limit=8):
-    """동네·도시 이름으로 위치를 찾는다. [{'name','label','lat','lon'}]
-    (Nominatim 이용 규칙: 1초에 한 번 이하, 입력할 때마다가 아니라 검색을 누를 때만)"""
-    q = (query or "").strip()
-    if not q:
-        return []
+_COORD = re.compile(r"^\s*(-?\d{1,3}(?:\.\d+)?)\s*[, ]\s*(-?\d{1,3}(?:\.\d+)?)\s*$")
+# 주소 끝에 붙는 번지·건물·층 같은 말 (지도 데이터에 없을 때가 많아 줄여 가며 다시 찾는다)
+_DETAIL = re.compile(r"(\d+(?:-\d+)?(?:번지|번길|호|층|동)?|\(.*?\)|[A-Za-z]?\d+층|지하\d*층?)$")
+
+
+def parse_coords(text):
+    """'37.4993, 127.0632' 같은 좌표면 (위도, 경도), 아니면 None."""
+    m = _COORD.match(text or "")
+    if not m:
+        return None
+    a, b = float(m.group(1)), float(m.group(2))
+    if 33 <= a <= 39 and 124 <= b <= 132:     # 한국 범위 (위도, 경도)
+        return a, b
+    if 33 <= b <= 39 and 124 <= a <= 132:     # (경도, 위도)로 넣은 경우
+        return b, a
+    if -90 <= a <= 90 and -180 <= b <= 180:
+        return a, b
+    return None
+
+
+def _nominatim(q, limit):
     with _geo_lock:
         wait = 1.1 - (time.monotonic() - _geo_last[0])
         if wait > 0:
@@ -123,24 +139,60 @@ def search_places(query, limit=8):
     url = (f"{GEO_URL}?format=jsonv2&addressdetails=1&limit={int(limit)}&countrycodes=kr&accept-language=ko&q="
            + urllib.parse.quote(q))
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    with net.urlopen(req, timeout=12) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _shorter(q):
+    """주소 뒷부분(번지·층·괄호)을 하나씩 떼어 낸 다음 검색어."""
+    q = q.strip().rstrip(",")
+    parts = q.split()
+    if len(parts) <= 1:
+        return None
+    last = parts[-1]
+    if _DETAIL.fullmatch(last) or any(ch.isdigit() for ch in last):
+        return " ".join(parts[:-1])
+    return " ".join(parts[:-1]) if len(parts) > 2 else None
+
+
+def search_places(query, limit=8):
+    """동네·도시 이름, 도로명/지번 주소, 또는 좌표로 위치를 찾는다. [{'name','label','lat','lon'}]
+    주소가 지도 데이터에 그대로 없으면 번지 등 뒷부분을 줄여 가며 다시 찾는다.
+    (Nominatim 이용 규칙: 1초에 한 번 이하, 입력할 때마다가 아니라 검색을 누를 때만)"""
+    q = (query or "").strip()
+    if not q:
+        return []
+    c = parse_coords(q)
+    if c:
+        return [{"name": f"좌표 {c[0]:.4f}, {c[1]:.4f}", "label": f"좌표 {c[0]:.4f}, {c[1]:.4f}",
+                 "lat": c[0], "lon": c[1]}]
+    tried, data, used = 0, [], q
     try:
-        with net.urlopen(req, timeout=12) as r:
-            data = json.loads(r.read().decode("utf-8"))
+        while used and tried < 4:
+            data = _nominatim(used, limit)
+            tried += 1
+            if data:
+                break
+            used = _shorter(used)
     except Exception as e:
         _log("지역 검색 실패", f"{q}: {e!r}")
         raise
     out, seen = [], set()
-    for x in data:
+    for x in data or []:
         a = x.get("address") or {}
-        name = x.get("name") or a.get("suburb") or a.get("city") or q
-        area = [a.get(k) for k in ("state", "city", "county", "borough", "city_district", "town") if a.get(k)]
+        name = x.get("name") or a.get("road") or a.get("suburb") or a.get("city") or used
+        area = [a.get(k) for k in ("state", "city", "county", "borough", "city_district", "town", "suburb", "quarter")
+                if a.get(k)]
         area = [v for i, v in enumerate(area) if v != name and v not in area[:i]]
-        label = f"{name} ({' '.join(area[:2])})" if area else name
+        label = f"{name} ({' '.join(area[:3])})" if area else name
         key = (round(float(x["lat"]), 3), round(float(x["lon"]), 3))
         if key in seen:
             continue
         seen.add(key)
-        out.append({"name": name, "label": label, "lat": float(x["lat"]), "lon": float(x["lon"])})
+        item = {"name": name, "label": label, "lat": float(x["lat"]), "lon": float(x["lon"])}
+        if used != q:
+            item["approx"] = used
+        out.append(item)
     return out
 
 

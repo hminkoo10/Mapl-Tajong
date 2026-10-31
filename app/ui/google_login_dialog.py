@@ -19,6 +19,7 @@ class GoogleLoginDialog(BaseDialog):
     def __init__(self, parent=None):
         super().__init__("구글 로그인", "YouTube에서 종소리를 받을 때 쓸 구글 계정으로 로그인해요.", None, parent, 460)
         self._cancel = threading.Event()
+        self._finished = threading.Event()
         self._done = False
         self._bridge = _Bridge(self)
         self._bridge.text.connect(self._set_status)
@@ -35,7 +36,7 @@ class GoogleLoginDialog(BaseDialog):
 
         notes = QVBoxLayout()
         notes.setSpacing(6)
-        for t in ("로그인을 마치면 브라우저 창이 저절로 닫혀요.",
+        for t in ("로그인을 마치면 브라우저 창을 닫거나 아래 ‘로그인을 마쳤어요’를 눌러 주세요.",
                   "평소 쓰는 브라우저와는 따로 열리는 창이에요.",
                   "자주 쓰지 않는 구글 계정을 써도 괜찮아요.",
                   "로그인 정보는 이 컴퓨터에만 저장하고 다른 곳으로 보내지 않아요."):
@@ -45,7 +46,8 @@ class GoogleLoginDialog(BaseDialog):
             notes.addWidget(lab)
         self.body.addLayout(notes)
 
-        self.btn_ok.hide()
+        self.btn_ok.setText("로그인을 마쳤어요")
+        self.btn_ok.setEnabled(False)
         self.btn_cancel.setText("취소")
         QTimer.singleShot(150, self._start)
 
@@ -57,8 +59,19 @@ class GoogleLoginDialog(BaseDialog):
             self.show_error("둘 중 하나를 설치한 뒤 다시 해 주세요.")
             return
         self.status.setText(f"{found[0]} 창에서 구글 계정으로 로그인해 주세요")
-        run_async(google_login.run_login, self._cancel, self._bridge.text.emit, 900, found,
+        self.btn_ok.setEnabled(True)
+        run_async(google_login.run_login, self._cancel, self._bridge.text.emit, 900, found, self._finished,
                   on_done=self._ok, on_fail=self._fail)
+
+    def _try_accept(self):
+        # '로그인을 마쳤어요': 브라우저를 닫고 로그인 정보를 읽게 한다
+        if self._done:
+            self.accept()
+            return
+        self._finished.set()
+        self.btn_ok.setEnabled(False)
+        self.spinner.show()
+        self.status.setText("로그인 정보를 확인하고 있어요")
 
     def _set_status(self, text):
         try:
@@ -82,6 +95,7 @@ class GoogleLoginDialog(BaseDialog):
             self.spinner.hide()
             self.status.setText("로그인하지 못했어요")
             self.show_error(msg)
+            self.btn_ok.hide()
             self.btn_cancel.setText("닫기")
         except RuntimeError:
             pass

@@ -61,8 +61,9 @@ def weather_checks():
             data = json.loads(r.read().decode("utf-8"))
         return [(x.get("display_name", "")[:50], x.get("lat"), x.get("lon"), x.get("addresstype")) for x in data[:3]]
     import urllib.parse
-    for q in ("대치동", "분당구"):
-        step(f"지역 검색(앱) {q}", lambda q=q: [x["label"] for x in weather.search_places(q)][:3])
+    for q in ("대치동", "분당구", "서울 강남구 테헤란로 152", "경기도 성남시 분당구 정자일로 95 3층", "37.4993, 127.0632"):
+        step(f"지역 검색(앱) {q}", lambda q=q: [(x["label"], round(x["lat"], 4), round(x["lon"], 4), x.get("approx"))
+                                            for x in weather.search_places(q)][:3])
     step("날씨 대치동(좌표)", lambda: (lambda d: f"{d['city']} {d['now']}" if d else "None")(
         weather.get({"name": "대치동", "lat": 37.4993, "lon": 127.0632}, force=True)))
 

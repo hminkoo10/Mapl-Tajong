@@ -55,17 +55,18 @@ class _ResultRow(QWidget):
         if rest:
             p.setPen(qc(C.grey500))
             p.setFont(font(13))
-            p.drawText(r.adjusted(int(48 + nw), 0, -10, 0), Qt.AlignmentFlag.AlignVCenter,
-                       QFontMetricsF(p.font()).elidedText(rest, Qt.TextElideMode.ElideRight, r.width() - nw - 60))
-        if self.hover:
-            p.setPen(qc(C.accent_text))
-            p.setFont(font(13, QFont.Weight.Bold))
-            p.drawText(r.adjusted(0, 0, -14, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, "고르기")
+            p.drawText(r.adjusted(int(48 + nw), 0, -130, 0), Qt.AlignmentFlag.AlignVCenter,
+                       QFontMetricsF(p.font()).elidedText(rest, Qt.TextElideMode.ElideRight, r.width() - nw - 190))
+        coord = f"{self.place['lat']:.4f}, {self.place['lon']:.4f}"
+        p.setFont(font(12, QFont.Weight.Medium) if not self.hover else font(13, QFont.Weight.Bold))
+        p.setPen(qc(C.accent_text) if self.hover else qc(C.grey400))
+        p.drawText(r.adjusted(0, 0, -14, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+                   "고르기" if self.hover else coord)
 
 
 class PlaceDialog(BaseDialog):
     def __init__(self, current_name="", parent=None):
-        super().__init__("날씨 지역 고르기", "동네나 도시 이름으로 찾거나, 아래 도시에서 골라 주세요.", None, parent, 560)
+        super().__init__("날씨 지역 고르기", "동네·주소로 찾거나, 아래 도시에서 골라 주세요.", None, parent, 560)
         self.result = None
         self._seq = 0
 
@@ -76,7 +77,7 @@ class PlaceDialog(BaseDialog):
         row = QHBoxLayout()
         row.setSpacing(8)
         self.query = QLineEdit()
-        self.query.setPlaceholderText("예) 대치동, 분당구, 수원시, 제주")
+        self.query.setPlaceholderText("예) 대치동 · 서울 강남구 테헤란로 152 · 37.50, 127.06")
         self.query.addAction(icons.icon("search", C.grey500, 16), QLineEdit.ActionPosition.LeadingPosition)
         self.query.textChanged.connect(self._filter)
         self.query.returnPressed.connect(self.search)
@@ -91,6 +92,7 @@ class PlaceDialog(BaseDialog):
         self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self.scroll.setMinimumHeight(300)
         holder = QWidget()
+        holder.setObjectName("placeHolder")
         self.lay = QVBoxLayout(holder)
         self.lay.setContentsMargins(0, 0, 6, 0)
         self.lay.setSpacing(8)
@@ -109,14 +111,16 @@ class PlaceDialog(BaseDialog):
         self.grid = QGridLayout()
         self.grid.setHorizontalSpacing(6)
         self.grid.setVerticalSpacing(6)
+        self.grid.setColumnStretch(6, 1)     # 남는 폭은 오른쪽으로 (버튼이 왼쪽부터 붙도록)
+        self.lay.addLayout(self.grid)
+        self.lay.addStretch(1)
+        # 버튼은 처음부터 이 창 안에 만든다 (부모 없이 만들면 잠깐씩 따로 창으로 떴다 사라진다)
         self.chips = []
         for name, lat, lon in weather.CITIES:
-            c = ChipButton(name, checkable=False)
+            c = ChipButton(name, holder, checkable=False)
             c.clicked.connect(lambda _=False, n=name, a=lat, b=lon: self._choose({"name": n, "lat": a, "lon": b}))
             self.chips.append((name, c))
         self._layout_chips(weather.CITIES)
-        self.lay.addLayout(self.grid)
-        self.lay.addStretch(1)
         self.scroll.setWidget(holder)
         self.body.addWidget(self.scroll, 1)
 
@@ -185,8 +189,12 @@ class PlaceDialog(BaseDialog):
                 row = _ResultRow(pl)
                 row.clicked.connect(self._choose)
                 self.results.addWidget(row)
-            self.state.setText(f"{len(places)}곳을 찾았어요. 눌러서 고르세요." if places
-                               else "찾는 곳이 없어요. 동네(○○동)나 시·구 이름으로 찾아 보세요.")
+            approx = places and places[0].get("approx")
+            if places:
+                self.state.setText((f"정확한 주소는 못 찾아서 ‘{approx}’ 기준으로 찾았어요. " if approx else "")
+                                   + f"{len(places)}곳을 찾았어요. 눌러서 고르세요.")
+            else:
+                self.state.setText("찾는 곳이 없어요. 동네(○○동)나 시·구 이름, 또는 도로명 주소로 찾아 보세요.")
         except RuntimeError:
             pass
 

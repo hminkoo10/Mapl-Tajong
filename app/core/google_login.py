@@ -134,43 +134,79 @@ def has_login(cookies):
     return any(c.get("name") in LOGIN_COOKIES and str(c.get("domain", "")).endswith("youtube.com") for c in cookies)
 
 
-class LoginSession:
-    """전용 프로필로 브라우저를 열고, 로그인될 때까지 지켜본다."""
+def profile_in_use():
+    """전용 프로필로 브라우저가 떠 있는지 (프로필 잠금 파일로 확인)."""
+    d = profile_dir()
+    if _IS_WIN:
+        lf = d / "lockfile"
+        if not lf.exists():
+            return False
+        try:
+            lf.unlink()          # 브라우저가 쓰는 중이면 지울 수 없다
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+    return os.path.islink(d / "SingletonLock") or (d / "SingletonLock").exists()
 
-    def __init__(self, exe, extra_args=None):
+
+class LoginSession:
+    """전용 프로필로 브라우저를 연다.
+
+    로그인하는 동안에는 브라우저를 평범하게 연다. (개발자 연결을 켜 두면 구글이 '안전하지 않은 브라우저'로
+    보고 로그인을 막는다.) 로그인이 끝나 창이 닫히면, 같은 프로필을 화면 없이 잠깐 다시 열어
+    로그인 정보만 읽고 바로 닫는다."""
+
+    def __init__(self, exe):
         self.exe = exe
-        self.extra_args = list(extra_args or [])
         self.proc = None
         self._id = 0
-        self._reused = False
+        self._dev_dir = None
 
-    def start(self, url=LOGIN_URL):
-        d = profile_dir()
-        d.mkdir(parents=True, exist_ok=True)
-        # 지난번 로그인 창이 아직 열려 있으면 그 창에 새 탭으로 연다
-        try:
-            if self._call("Browser.getVersion", timeout=2) is not None:
-                self._call("Target.createTarget", {"url": url}, timeout=3)
-                self._reused = True
-                return
-        except Exception:
-            pass
-        (d / "DevToolsActivePort").unlink(missing_ok=True)
-        args = [self.exe, f"--user-data-dir={d}", "--remote-debugging-port=0", "--no-first-run",
-                "--no-default-browser-check", "--disable-sync", "--new-window", *self.extra_args, url]
-        if os.environ.get("MAPL_LOGIN_HEADLESS"):   # 시험용
-            args[1:1] = ["--headless=new", "--no-sandbox"]
+    def _base_args(self):
+        return [self.exe, f"--user-data-dir={profile_dir()}", "--no-first-run", "--no-default-browser-check"]
+
+    def open_login(self, url=LOGIN_URL):
+        profile_dir().mkdir(parents=True, exist_ok=True)
+        args = self._base_args()
+        if os.environ.get("MAPL_LOGIN_HEADLESS"):   # 시험용: 화면 없이, 쿠키를 넣을 수 있게
+            args += ["--headless=new", "--no-sandbox", "--remote-debugging-port=0"]
+        args.append(url)
         self.proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                      stderr=subprocess.DEVNULL)
 
-    def alive(self):
+    def running(self):
         if self.proc is not None and self.proc.poll() is None:
             return True
-        try:
-            return self._call("Browser.getVersion", timeout=2) is not None
-        except Exception:
-            return False
+        return profile_in_use()
 
+    def request_close(self, wait=15):
+        """창을 정상적으로 닫게 한다 (로그인 정보가 디스크에 저장되도록). 안 닫히면 강제로."""
+        if self.proc is not None and self.proc.poll() is None:
+            try:
+                if _IS_WIN:
+                    subprocess.run(["taskkill", "/PID", str(self.proc.pid), "/T"], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, creationflags=0x08000000, timeout=10)
+                else:
+                    self.proc.terminate()
+            except Exception:
+                pass
+        end = time.monotonic() + wait
+        while time.monotonic() < end and self.running():
+            time.sleep(0.4)
+        if self.running() and self.proc is not None:
+            try:
+                if _IS_WIN:
+                    subprocess.run(["taskkill", "/PID", str(self.proc.pid), "/T", "/F"], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, creationflags=0x08000000, timeout=10)
+                else:
+                    self.proc.kill()
+            except Exception:
+                pass
+            time.sleep(1.5)
+
+    # ---- 화면 없이 다시 열어 로그인 정보 읽기 ----
     def _ws_url(self):
         f = profile_dir() / "DevToolsActivePort"
         try:
@@ -196,57 +232,78 @@ class LoginSession:
                     return msg.get("result") or {}
         return None
 
-    def cookies(self):
-        """브라우저가 아직 준비되지 않았으면 None."""
-        res = self._call("Storage.getCookies")
-        return None if res is None else (res.get("cookies") or [])
-
-    def close(self):
+    def read_cookies(self, timeout=30):
+        """프로필을 화면 없이 열어 쿠키를 읽고 닫는다."""
+        (profile_dir() / "DevToolsActivePort").unlink(missing_ok=True)
+        args = self._base_args() + ["--headless=new", "--remote-debugging-port=0", "--disable-gpu",
+                                    "--mute-audio", "about:blank"]
+        if os.environ.get("MAPL_LOGIN_HEADLESS"):
+            args.insert(-1, "--no-sandbox")
+        proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, creationflags=0x08000000 if _IS_WIN else 0)
         try:
-            self._call("Browser.close", timeout=3)
-        except Exception:
-            pass
-        if self.proc is not None:
-            try:
-                self.proc.wait(timeout=5)
-            except Exception:
+            end = time.monotonic() + timeout
+            while time.monotonic() < end:
                 try:
-                    self.proc.terminate()
+                    res = self._call("Storage.getCookies")
                 except Exception:
-                    pass
+                    res = None
+                if res is not None:
+                    return res.get("cookies") or []
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.5)
+            raise LoginError("로그인 정보를 읽지 못했어요. 브라우저 창을 모두 닫고 다시 해 주세요.")
+        finally:
+            try:
+                self._call("Browser.close", timeout=3)
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
 
 
-def run_login(cancel_event=None, status_cb=None, timeout=900, browser=None):
-    """로그인 창을 열고 끝날 때까지 기다린다 (작업 스레드에서 호출).
-    성공하면 저장한 쿠키 수, 사용자가 창을 닫거나 취소하면 LoginError."""
+def run_login(cancel_event=None, status_cb=None, timeout=900, browser=None, done_event=None):
+    """로그인 창을 열고, 사용자가 로그인 뒤 창을 닫거나 '마쳤어요'를 누르면 로그인 정보를 읽는다.
+    (작업 스레드에서 호출) 성공하면 저장한 쿠키 수, 실패·취소하면 LoginError."""
     found = browser or find_browser()
     if not found:
         raise LoginError("Chrome이나 Edge를 찾지 못했어요. 둘 중 하나를 설치한 뒤 다시 해 주세요.")
     label, exe = found
     s = LoginSession(exe)
-    s.start()
+    s.open_login()
     if status_cb:
         status_cb(f"{label} 창에서 구글 계정으로 로그인해 주세요")
     start = time.monotonic()
-    end = start + timeout
-    seen_devtools = False
+    seen_open = False
     try:
-        while time.monotonic() < end:
+        while True:
             if cancel_event is not None and cancel_event.is_set():
                 raise LoginError("로그인을 취소했어요.")
-            try:
-                cookies = s.cookies()
-                seen_devtools = seen_devtools or cookies is not None
-            except Exception:
-                cookies = None
-            if cookies and has_login(cookies):
-                n = _write_cookies(cookies, cookie_file())
-                if status_cb:
-                    status_cb("로그인했어요")
-                return n
-            if not s.alive() and (seen_devtools or time.monotonic() > start + 10):
-                raise LoginError("로그인 창이 닫혔어요. 다시 해 주세요.")
-            time.sleep(1.2)
-        raise LoginError("로그인을 기다리다 시간이 지났어요. 다시 해 주세요.")
-    finally:
-        s.close()
+            if time.monotonic() - start > timeout:
+                raise LoginError("로그인을 기다리다 시간이 지났어요. 다시 해 주세요.")
+            if done_event is not None and done_event.is_set():
+                break
+            is_open = s.running()
+            seen_open = seen_open or is_open
+            if not is_open and (seen_open or time.monotonic() - start > 10):
+                break                       # 사용자가 창을 닫았다
+            time.sleep(0.8)
+        if status_cb:
+            status_cb("로그인 정보를 확인하고 있어요")
+        s.request_close()
+        if cancel_event is not None and cancel_event.is_set():
+            raise LoginError("로그인을 취소했어요.")
+        cookies = s.read_cookies()
+        if not has_login(cookies):
+            raise LoginError("로그인이 확인되지 않았어요. 브라우저에서 YouTube까지 로그인한 뒤 창을 닫아 주세요.")
+        n = _write_cookies(cookies, cookie_file())
+        if status_cb:
+            status_cb("로그인했어요")
+        return n
+    except BaseException:
+        if cancel_event is not None and cancel_event.is_set():
+            s.request_close(wait=5)
+        raise
