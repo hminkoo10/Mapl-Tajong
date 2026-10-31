@@ -6,6 +6,6 @@ REM 결과: dist\installer\MaplTajong-Setup-x.y.z.exe
 REM YouTube 쪽은 자주 바뀌므로 빌드할 때마다 yt-dlp 를 최신으로 올려 줍니다.
 
 python -m pip install --upgrade pip
-python -m pip install --upgrade -r requirements.txt pyinstaller
+python -m pip install --upgrade -r requirements.txt pyinstaller pillow
 python tools\build.py
 pause

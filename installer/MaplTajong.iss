@@ -16,6 +16,9 @@
 #ifndef OutputDir
   #define OutputDir "..\dist\installer"
 #endif
+#ifndef SetupIcon
+  #define SetupIcon "..\app\assets\ui\app.ico"
+#endif
 
 [Setup]
 ; AppId 는 절대 바꾸면 안 됨 (바꾸면 업데이트가 아니라 새 프로그램으로 설치됨)
@@ -37,7 +40,7 @@ UsePreviousTasks=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-SetupIconFile=..\app\assets\ui\app.ico
+SetupIconFile={#SetupIcon}
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 OutputDir={#OutputDir}

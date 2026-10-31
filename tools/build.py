@@ -67,18 +67,32 @@ def write_version_info(version):
     return p
 
 
+def windows_icon():
+    """app.ico 가 사실 PNG 그림이라 Windows exe/설치 파일 아이콘으로 쓸 수 있게 진짜 ICO로 바꾼다 (그림은 그대로)."""
+    src = ROOT / "app" / "assets" / "ui" / "app.ico"
+    if src.read_bytes()[:4] == b"\x00\x00\x01\x00":
+        return src
+    from PIL import Image
+    BUILD.mkdir(parents=True, exist_ok=True)
+    dst = BUILD / "app_win.ico"
+    im = Image.open(src).convert("RGBA").resize((256, 256), Image.LANCZOS)
+    sizes = [(s, s) for s in (16, 20, 24, 32, 40, 48, 64, 100, 128, 256)]
+    im.save(dst, format="ICO", sizes=sizes, bitmap_format="bmp")
+    return dst
+
+
 def run(cmd):
     print(">", " ".join(str(c) for c in cmd), flush=True)
     subprocess.run([str(c) for c in cmd], check=True, cwd=ROOT)
 
 
-def build_exe(version):
+def build_exe(version, icon):
     vi = write_version_info(version)
     sep = os.pathsep
     args = [
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--windowed",
         "--name", "Mataf",
-        "--icon", ROOT / "app" / "assets" / "ui" / "app.ico",
+        "--icon", icon,
         "--version-file", vi,
         "--paths", ROOT,
         "--add-data", f"{ROOT / 'app' / 'assets'}{sep}assets",
@@ -109,14 +123,14 @@ def find_iscc():
     return None
 
 
-def build_installer(version, source_dir):
+def build_installer(version, source_dir, icon):
     iscc = find_iscc()
     if not iscc:
         sys.exit("Inno Setup 6(ISCC.exe)을 찾지 못했어요. https://jrsoftware.org/isdl.php 에서 설치해 주세요.")
     out = DIST / "installer"
     out.mkdir(parents=True, exist_ok=True)
     run([iscc, f"/DAppVersion={version}", f"/DSourceDir={source_dir}", f"/DOutputDir={out}",
-         ROOT / "installer" / "MaplTajong.iss"])
+         f"/DSetupIcon={icon}", ROOT / "installer" / "MaplTajong.iss"])
     setup = out / f"MaplTajong-Setup-{version}.exe"
     if not setup.exists():
         sys.exit("설치 파일이 만들어지지 않았어요.")
@@ -137,11 +151,12 @@ def main():
     a = ap.parse_args()
     version = app_version()
     print(f"마고 타종 {version} 빌드", flush=True)
-    src = build_exe(version)
+    icon = windows_icon()
+    src = build_exe(version, icon)
     if a.no_installer:
         print(f"완료: {src}")
         return
-    setup = build_installer(version, src)
+    setup = build_installer(version, src, icon)
     print(f"완료: {setup}")
 
 
