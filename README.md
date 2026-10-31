@@ -33,16 +33,6 @@
 **다음 종까지 10분 넘게 남았고 소리가 나지 않을 때** 조용히 설치한 뒤 다시 켜져요.
 설정 → 업데이트에서 끄거나 바로 설치할 수 있어요.
 
-## 새 버전 내보내기 (개발자용)
-1. `app/core/version.py`의 `APP_VERSION`을 올려요. (예: `2.0.1`)
-2. `CHANGELOG.md` 맨 위에 `## 2.0.1` 항목을 써요. 이 내용이 릴리스 노트와 ‘새로워진 점’이 돼요.
-3. 커밋하고 `desktop-v2.0.1` 태그를 올려요. (또는 GitHub에서 `release/desktop-v2.0.1` 브랜치를 만들어도 돼요)
-   ```
-   git tag desktop-v2.0.1
-   git push origin desktop-v2.0.1
-   ```
-4. GitHub Actions가 설치 파일을 만들어 Release에 올리면, 설치된 프로그램들이 알아서 업데이트해요.
-
 ## 직접 빌드하기
 ```
 pip install -r requirements.txt
