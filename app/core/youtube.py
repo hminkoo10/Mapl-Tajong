@@ -474,6 +474,9 @@ def _clip_via_ytdlp(m, url, seconds, tmp, source, cancel_event=None, status_cb=N
         except Cancelled:
             if not early["stop"]:
                 raise
+        # 중간에 멈춘 다운로드가 붙잡고 있던 파일을 닫아 내용이 디스크에 다 쓰이게 한다
+        import gc
+        gc.collect()
         # 조각 임시 파일(-FragN)이 아니라 이어 붙인 본 파일(clip.xxx 또는 clip.xxx.part)을 쓴다
         files = sorted((f for f in work_dir.iterdir()
                         if f.is_file() and f.stat().st_size > 0 and "-Frag" not in f.name
