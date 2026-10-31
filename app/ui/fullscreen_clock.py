@@ -2,7 +2,7 @@
 import time
 from datetime import datetime
 
-from PyQt6.QtCore import QDateTime, QPointF, QRectF, Qt, QTimer
+from PyQt6.QtCore import QDateTime, QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPixmap, QRadialGradient
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
@@ -107,11 +107,15 @@ class _UpcomingStrip(QWidget):
 
 
 class _WeatherNow(QWidget):
-    """오른쪽 위: 지금 날씨와 오늘 최고/최저."""
+    """오른쪽 위: 지금 날씨와 오늘 최고/최저. 누르면 지역을 바꾼다."""
+    clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.data = None
+        self.failed = False
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("눌러서 날씨 지역 바꾸기")
         self.th = THEMES["dark"]
         self.px = 40
 
@@ -127,9 +131,19 @@ class _WeatherNow(QWidget):
         self.setMinimumWidth(int(px * 10))
         self.updateGeometry()
 
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+
     def paintEvent(self, e):
         d = self.data
         if not d:
+            if self.failed:
+                p = QPainter(self)
+                p.setPen(qc(*self.th["dim"]))
+                p.setFont(font(self.px * 0.5, QFont.Weight.Medium))
+                p.drawText(QRectF(self.rect()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+                           "날씨를 불러오지 못했어요 · 눌러서 지역 확인")
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -270,6 +284,7 @@ class FullscreenClock(TickingWidget):
         top.addWidget(self.date_label, 0, Qt.AlignmentFlag.AlignVCenter)
         top.addStretch(1)
         self.wx_now = _WeatherNow()
+        self.wx_now.clicked.connect(self._pick_place)
         top.addWidget(self.wx_now, 0, Qt.AlignmentFlag.AlignVCenter)
         top.addSpacing(8)
         self.btn_theme = Button("", icon_name="sun")
@@ -402,16 +417,23 @@ class FullscreenClock(TickingWidget):
             self.wx_now.set_data(None)
             self.hourly.set_data(None)
             return
-        city = repo.get_setting(self.ctx.conn, "weather_city", weather.DEFAULT_CITY)
+        city = weather.setting_value(lambda k, d: repo.get_setting(self.ctx.conn, k, d))
         self._wx_seq += 1
         seq = self._wx_seq
-        run_async(weather.get, city, on_done=lambda d: self._weather_ready(seq, d))
+        run_async(weather.get, city, on_done=lambda d: self._weather_ready(seq, d),
+                  on_fail=lambda m: self._weather_ready(seq, None))
+
+    def _pick_place(self):
+        from app.ui.place_dialog import pick_place
+        if pick_place(self.ctx.conn, self):
+            self._load_weather()
 
     def _weather_ready(self, seq, data):
         try:
             if seq != self._wx_seq:
                 return
             self._weather = data
+            self.wx_now.failed = data is None
             self.wx_now.set_data(data)
             self.hourly.set_data(data)
             self.credit.setVisible(bool(data))

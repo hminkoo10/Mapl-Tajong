@@ -50,6 +50,8 @@ SolidCompression=yes
 WizardStyle=modern
 CloseApplications=force
 RestartApplications=no
+; 설치하는 동안 이 표시를 세워 둔다. 그 사이에 프로그램을 켜면 '설치 중' 안내만 하고 닫힌다.
+SetupMutex=MaplTajongSetupRunning
 ShowLanguageDialog=no
 
 [Languages]
@@ -62,10 +64,6 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "바탕 화면에 바로가기 만들기"; GroupDescription: "추가 작업:"
 Name: "autostart"; Description: "컴퓨터를 켜면 자동으로 실행"; GroupDescription: "추가 작업:"
-
-[InstallDelete]
-; 이전 버전의 라이브러리 폴더를 지우고 새로 깐다 (남은 파일 때문에 생기는 오류 방지)
-Type: filesandordirs; Name: "{app}\_internal"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -80,14 +78,34 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 ; 직접 설치했을 때: 마지막 화면의 '실행' 체크
-Filename: "{app}\{#AppExe}"; Description: "마고 타종 실행"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Parameters: "--after-setup"; Description: "마고 타종 실행"; Flags: nowait postinstall skipifsilent
 ; 자동 업데이트(조용한 설치)일 때: 설치가 끝나면 바로 다시 켠다
-Filename: "{app}\{#AppExe}"; Flags: nowait; Check: WizardSilent
+Filename: "{app}\{#AppExe}"; Parameters: "--after-setup"; Flags: nowait; Check: WizardSilent
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#AppExe} /F"; Flags: runhidden; RunOnceId: "StopApp"
 
 [Code]
+// 설치 전에 이 폴더에서 실행 중인 프로그램(본체, ffmpeg, deno, bgutil-pot 등)을 모두 닫는다.
+// 파일이 잠겨 덮어쓰지 못하는 일을 막는다.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  AppDir, Cmd: String;
+  Code: Integer;
+begin
+  Result := '';
+  AppDir := ExpandConstant('{app}');
+  if DirExists(AppDir) then
+  begin
+    StringChangeEx(AppDir, '''', '''''', True);
+    Cmd := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith(''' + AppDir + '\'', [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue"';
+    Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Cmd, '', SW_HIDE, ewWaitUntilTerminated, Code);
+  end;
+end;
+
 function IsUpgrade(): Boolean;
 begin
   Result := RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{' + '{#AppGuid}' + '}_is1', 'UninstallString');

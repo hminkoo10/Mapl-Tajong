@@ -205,12 +205,14 @@ def download(info: UpdateInfo, progress_cb=None, cancel_event=None, allowed_host
     return dst
 
 
-def launch_installer(path):
-    """설치 파일을 조용히 실행. 설치가 끝나면 설치 파일이 프로그램을 다시 켠다."""
+def launch_installer(path, visible=False):
+    """설치 파일을 묻지 않고 실행. 설치가 끝나면 설치 파일이 프로그램을 다시 켠다.
+    visible=True 면 진행 창을 보여 준다(직접 누른 업데이트). 자동 업데이트는 창 없이."""
     if sys.platform != "win32":
         raise UpdateError("Windows에서만 설치할 수 있어요.")
     log = updates_dir() / "install.log"
-    args = [str(path), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", f"/LOG={log}"]
+    args = [str(path), "/SILENT" if visible else "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+            "/CLOSEAPPLICATIONS", f"/LOG={log}"]
     flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     subprocess.Popen(args, creationflags=flags, close_fds=True, cwd=str(Path(path).parent))
 

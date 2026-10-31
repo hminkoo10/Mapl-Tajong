@@ -85,16 +85,13 @@ class SettingsPage(QWidget):
         self.chk_weather.toggled.connect(self._on_weather_toggle)
         fs.body.addWidget(_row("날씨 예보 보이기", "지금 날씨와 앞으로 몇 시간의 예보를 함께 보여 줘요.", self.chk_weather))
         fs.body.addWidget(hline())
-        self.weather_city = Select()
-        self.weather_city.setProperty("page", True)
-        for name, _, _ in weather.CITIES:
-            self.weather_city.addItem(name, name)
-        i = self.weather_city.findData(repo.get_setting(self.conn, "weather_city", weather.DEFAULT_CITY))
-        self.weather_city.setCurrentIndex(max(0, i))
-        self.weather_city.setMinimumWidth(120)
-        self.weather_city.currentIndexChanged.connect(self._on_weather_city)
+        self.weather_city = Button("바꾸기", variant="secondary")
+        self.weather_city.clicked.connect(self._on_weather_city)
         self.weather_city.setEnabled(self.chk_weather.isChecked())
-        fs.body.addWidget(_row("날씨 지역", "가까운 도시를 골라 주세요.", self.weather_city))
+        self.place_row = _row("날씨 지역", " ", self.weather_city)
+        self.place_desc = self.place_row.findChildren(QLabel)[1]
+        self._sync_place()
+        fs.body.addWidget(self.place_row)
         fs.body.addWidget(hline())
         self.fs_theme = Select()
         self.fs_theme.setProperty("page", True)
@@ -251,9 +248,16 @@ class SettingsPage(QWidget):
         repo.set_setting(self.conn, "weather_on", "1" if on else "0")
         self.weather_city.setEnabled(on)
 
-    def _on_weather_city(self, _i):
-        repo.set_setting(self.conn, "weather_city", self.weather_city.currentData())
-        self.ctx.toast(f"{self.weather_city.currentData()} 날씨를 보여 줄게요", "success")
+    def _sync_place(self):
+        name = weather.place_of(weather.setting_value(lambda k, d: repo.get_setting(self.conn, k, d)))[0]
+        self.place_desc.setText(f"{name} · 동네 이름으로 찾을 수 있어요.")
+
+    def _on_weather_city(self):
+        from app.ui.place_dialog import pick_place
+        name = pick_place(self.conn, self)
+        if name:
+            self._sync_place()
+            self.ctx.toast(f"{name} 날씨를 보여 줄게요", "success")
 
     def _show_history(self):
         from app.ui.changelog_dialog import ChangelogDialog

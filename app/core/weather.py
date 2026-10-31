@@ -4,13 +4,16 @@
 - 받은 내용은 파일로 보관해 인터넷이 잠깐 끊겨도 마지막 예보를 보여 준다.
 """
 import json
+import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 
-from app.core.paths import ui_cache_dir
+from app.core import net
+from app.core.paths import app_data_dir, ui_cache_dir
 from app.core.version import APP_VERSION
 
 API = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
@@ -71,6 +74,74 @@ def city(name):
         if c[0] == name:
             return c
     return CITIES[0]
+
+
+def place_of(value):
+    """설정값(도시 이름 또는 {'name','lat','lon'} JSON)을 (이름, 위도, 경도)로."""
+    if isinstance(value, dict):
+        try:
+            return str(value["name"]), float(value["lat"]), float(value["lon"])
+        except (KeyError, TypeError, ValueError):
+            return city(DEFAULT_CITY)
+    text = str(value or "").strip()
+    if text.startswith("{"):
+        try:
+            return place_of(json.loads(text))
+        except ValueError:
+            pass
+    return city(text or DEFAULT_CITY)
+
+
+def _log(kind, detail):
+    try:
+        p = app_data_dir() / "weather.log"
+        lines = p.read_text(encoding="utf-8").splitlines()[-200:] if p.exists() else []
+        lines.append(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {kind}: {str(detail)[:500]}")
+        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+# ---------------- 지역 검색 (OpenStreetMap Nominatim) ----------------
+GEO_URL = "https://nominatim.openstreetmap.org/search"
+GEO_CREDIT = "지역 검색: © OpenStreetMap 기여자"
+_geo_lock = threading.Lock()
+_geo_last = [0.0]
+
+
+def search_places(query, limit=8):
+    """동네·도시 이름으로 위치를 찾는다. [{'name','label','lat','lon'}]
+    (Nominatim 이용 규칙: 1초에 한 번 이하, 입력할 때마다가 아니라 검색을 누를 때만)"""
+    q = (query or "").strip()
+    if not q:
+        return []
+    with _geo_lock:
+        wait = 1.1 - (time.monotonic() - _geo_last[0])
+        if wait > 0:
+            time.sleep(wait)
+        _geo_last[0] = time.monotonic()
+    url = (f"{GEO_URL}?format=jsonv2&addressdetails=1&limit={int(limit)}&countrycodes=kr&accept-language=ko&q="
+           + urllib.parse.quote(q))
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    try:
+        with net.urlopen(req, timeout=12) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        _log("지역 검색 실패", f"{q}: {e!r}")
+        raise
+    out, seen = [], set()
+    for x in data:
+        a = x.get("address") or {}
+        name = x.get("name") or a.get("suburb") or a.get("city") or q
+        area = [a.get(k) for k in ("state", "city", "county", "borough", "city_district", "town") if a.get(k)]
+        area = [v for i, v in enumerate(area) if v != name and v not in area[:i]]
+        label = f"{name} ({' '.join(area[:2])})" if area else name
+        key = (round(float(x["lat"]), 3), round(float(x["lon"]), 3))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"name": name, "label": label, "lat": float(x["lat"]), "lon": float(x["lon"])})
+    return out
 
 
 def describe(symbol_code):
@@ -155,11 +226,13 @@ def parse(doc, now=None):
     }
 
 
-def get(city_name=DEFAULT_CITY, force=False, timeout=10):
-    """예보를 돌려준다 (작업 스레드에서 호출). 실패하면 보관해 둔 마지막 예보, 그것도 없으면 None."""
-    name, lat, lon = city(city_name)
+def get(place=DEFAULT_CITY, force=False, timeout=10):
+    """예보를 돌려준다 (작업 스레드에서 호출). 실패하면 보관해 둔 마지막 예보, 그것도 없으면 None.
+    place: 도시 이름, 또는 {'name','lat','lon'} (설정에 저장한 JSON 문자열도 됨)"""
+    name, lat, lon = place_of(place)
     cache = _read_cache()
-    same = cache.get("city") == name
+    key = f"{name}|{lat:.3f}|{lon:.3f}"
+    same = cache.get("key") == key
     now_ts = time.time()
     if same and not force and cache.get("doc") and now_ts < max(cache.get("expires") or 0,
                                                                   (cache.get("fetched") or 0) + MIN_INTERVAL):
@@ -169,9 +242,9 @@ def get(city_name=DEFAULT_CITY, force=False, timeout=10):
     if same and cache.get("last_modified") and cache.get("doc"):
         req.add_header("If-Modified-Since", cache["last_modified"])
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with net.urlopen(req, timeout=timeout) as r:
             doc = json.loads(r.read().decode("utf-8"))
-            cache = {"city": name, "doc": doc, "fetched": now_ts,
+            cache = {"key": key, "city": name, "doc": doc, "fetched": now_ts,
                      "expires": _http_time(r.headers.get("Expires")) or now_ts + 1800,
                      "last_modified": r.headers.get("Last-Modified") or ""}
             _write_cache(cache)
@@ -180,17 +253,29 @@ def get(city_name=DEFAULT_CITY, force=False, timeout=10):
             cache["fetched"] = now_ts
             cache["expires"] = _http_time(e.headers.get("Expires")) or now_ts + 1800
             _write_cache(cache)
-        elif not same:
-            return None
-    except Exception:
+        else:
+            _log("예보 받기 실패", f"{name}: HTTP {e.code}")
+            if not same:
+                return None
+    except Exception as e:
+        _log("예보 받기 실패", f"{name}: {e!r}")
         if not same:
             return None
     return _result(cache) if cache.get("doc") else None
 
 
 def _result(cache):
-    out = parse(cache["doc"])
+    try:
+        out = parse(cache["doc"])
+    except Exception as e:
+        _log("예보 읽기 실패", repr(e))
+        return None
     if out:
         out["city"] = cache.get("city")
         out["fetched"] = cache.get("fetched")
     return out
+
+
+def setting_value(get_setting):
+    """설정에서 지역 값을 읽는다 (예전 'weather_city' 도 그대로 쓴다)."""
+    return get_setting("weather_place", "") or get_setting("weather_city", DEFAULT_CITY)

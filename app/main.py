@@ -53,6 +53,21 @@ def _set_app_id():
             pass
 
 
+def _setup_running():
+    """업데이트 설치 파일이 돌고 있는지 (설치 파일이 세우는 표시로 확인)."""
+    if sys.platform != "win32" or "--after-setup" in sys.argv:
+        return False
+    try:
+        import ctypes
+        h = ctypes.windll.kernel32.OpenMutexW(0x00100000, False, "MaplTajongSetupRunning")
+        if h:
+            ctypes.windll.kernel32.CloseHandle(h)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def main():
     _set_app_id()
     _install_excepthook()
@@ -61,6 +76,10 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(False)
+
+    if _setup_running():
+        QMessageBox.information(None, "업데이트 중", "새 버전을 설치하고 있어요.\n설치가 끝나면 프로그램이 저절로 다시 켜져요.")
+        return
 
     ok = acquire(APP_NAME, app_data_dir())
     if not ok:
