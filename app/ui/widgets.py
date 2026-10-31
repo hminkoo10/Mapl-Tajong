@@ -5,7 +5,7 @@
 import math
 import time
 
-from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPoint, QPointF, QRectF, QSize, Qt, QTimer,
+from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer,
                           QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QColor, QConicalGradient, QFont, QFontMetricsF, QPainter, QPen, QPixmap, QRegion
 from PyQt6.QtWidgets import (QAbstractButton, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QStackedWidget,
@@ -47,6 +47,7 @@ class FrameTicker(QObject):
         self._t0 = time.monotonic()
         self._subs = []
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.TimerType.PreciseTimer)  # Windows 기본(Coarse)은 15.6ms 단위라 프레임이 들쭉날쭉
         self._timer.setInterval(16)
         self._timer.timeout.connect(self._tick)
 
@@ -601,7 +602,11 @@ class RollingClock(QWidget):
         self._old = ""
         self._starts = {}
         self._dur = 0.36
+        self._metrics_key = None
+        self._digit_w = 0.0
+        self._char_w = {}
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._timer.setInterval(16)
         self._timer.timeout.connect(self._tick)
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
@@ -609,6 +614,7 @@ class RollingClock(QWidget):
     def set_px(self, px):
         if px != self.px:
             self.px = px
+            self._metrics_key = None
             self.updateGeometry()
             self.update()
 
@@ -620,9 +626,38 @@ class RollingClock(QWidget):
         return font(self.px, self.weight)
 
     def _cells(self, text):
-        fm = QFontMetricsF(self._font())
-        dw = max(fm.horizontalAdvance(d) for d in "0123456789")
-        return [dw if ch.isdigit() else fm.horizontalAdvance(ch) for ch in text]
+        # 글자 폭은 크기가 바뀔 때만 다시 잰다
+        key = (self.px, int(self.weight.value) if hasattr(self.weight, "value") else int(self.weight))
+        if key != self._metrics_key:
+            fm = QFontMetricsF(self._font())
+            self._digit_w = max(fm.horizontalAdvance(d) for d in "0123456789")
+            self._char_w = {ch: fm.horizontalAdvance(ch) for ch in ":. -"}
+            self._fm_height = fm.height()
+            self._metrics_key = key
+        out = []
+        for ch in text:
+            if ch.isdigit():
+                out.append(self._digit_w)
+            else:
+                w = self._char_w.get(ch)
+                if w is None:
+                    w = self._char_w[ch] = QFontMetricsF(self._font()).horizontalAdvance(ch)
+                out.append(w)
+        return out
+
+    def _dirty_rect(self, indices):
+        """바뀌는 글자 칸만 다시 그리도록 (창 전체를 다시 그리지 않게) 그 영역을 계산."""
+        cells = self._cells(self._text)
+        total = sum(cells)
+        x0 = {"center": (self.width() - total) / 2, "right": self.width() - total}.get(self.align, 0.0)
+        xs = [x0]
+        for c in cells:
+            xs.append(xs[-1] + c)
+        lo = min(indices)
+        hi = max(indices)
+        if hi >= len(cells):
+            return self.rect()
+        return QRect(int(xs[lo]) - 2, 0, int(xs[hi + 1] - xs[lo]) + 5, self.height())
 
     def sizeHint(self):
         fm = QFontMetricsF(self._font())
@@ -648,14 +683,19 @@ class RollingClock(QWidget):
         self._text = s
         if self._starts and not self._timer.isActive():
             self._timer.start()
-        self.update()
+        if self._starts and len(old) == len(s):
+            self.update(self._dirty_rect(self._starts.keys()))
+        else:
+            self.update()
 
     def _tick(self):
         now = time.monotonic()
+        active = set(self._starts)
         self._starts = {i: t for i, t in self._starts.items() if now - t < self._dur}
         if not self._starts:
             self._timer.stop()
-        self.update()
+        if active:
+            self.update(self._dirty_rect(active))
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -689,12 +729,14 @@ class RollingClock(QWidget):
 
 
 class CountdownRing(TickingWidget):
-    """다음 종까지의 진행을 보여주는 얇은 링."""
+    """다음 종까지의 진행을 보여주는 얇은 링. 값이 바뀔 때만 부드럽게 움직인다."""
+    always_tick = False
 
     def __init__(self, parent=None, size=160, thickness=10, on_dark=False):
         super().__init__(parent)
         self.progress = 0.0
         self._shown = 0.0
+        self._tween = None
         self.center_text = "--:--"
         self.sub_text = "남음"
         self.urgent = False
@@ -702,7 +744,6 @@ class CountdownRing(TickingWidget):
         self.on_dark = on_dark
         self._bursts = []
         self._size = size
-        self._last = 0.0
         self.setMinimumSize(size, size)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
@@ -715,26 +756,46 @@ class CountdownRing(TickingWidget):
             self.setMinimumSize(s, s)
             self.updateGeometry()
 
+    def _set_shown(self, v):
+        self._shown = float(v)
+        self.update()
+
     def set_state(self, progress, center, sub=None, urgent=False):
-        self.progress = max(0.0, min(1.0, float(progress)))
+        progress = max(0.0, min(1.0, float(progress)))
+        changed = (center != self.center_text or sub not in (None, self.sub_text) or urgent != self.urgent)
         self.center_text = center
         if sub is not None:
             self.sub_text = sub
         self.urgent = urgent
+        if abs(progress - self.progress) > 0.0005:
+            self.progress = progress
+            jump = abs(progress - self._shown) > 0.02
+            if self._tween:
+                self._tween.stop()
+            if jump and self.isVisible():
+                self._tween = _anim(self, self._shown, progress, 700, self._set_shown)
+                self._tween.start()
+            else:
+                self._shown = progress
+                changed = True
+        if changed:
+            self.update()
 
     def burst(self):
         self._bursts.append(ticker().now())
+        self.start_ticking()
 
     def intro(self):
         self._shown = 0.0
+        target = self.progress
+        self.progress = -1.0
+        self.set_state(target, self.center_text, self.sub_text, self.urgent)
 
     def on_frame(self, t):
-        moving = abs(self.progress - self._shown) > 0.0005 or self._bursts
-        self._shown += (self.progress - self._shown) * 0.1
         self._bursts = [b for b in self._bursts if t - b < 1.2]
-        if moving or t - self._last > 0.25:
-            self._last = t
-            self.update()
+        if not self._bursts:
+            self.stop_ticking()
+        self.update()
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -754,7 +815,8 @@ class CountdownRing(TickingWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawEllipse(center, rr, rr)
 
-        track = qc("#FFFFFF", 0.12) if self.on_dark else qc(C.grey100)
+        track = qc(self.track_color) if getattr(self, "track_color", None) else (
+            qc("#FFFFFF", 0.12) if self.on_dark else qc(C.grey100))
         p.setPen(QPen(track, th, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(rect)
@@ -785,22 +847,37 @@ class CountdownRing(TickingWidget):
 
 
 class EqualizerBars(TickingWidget):
+    always_tick = False
+
     def __init__(self, parent=None, color=None, bars=4):
         super().__init__(parent)
         self.active = False
         self.color = QColor(color or C.accent)
         self.bars = bars
         self._level = 0.0
+        self._last = 0.0
         self.setFixedSize(22, 16)
 
     def set_active(self, on):
-        self.active = bool(on)
+        on = bool(on)
+        if on != self.active:
+            self.active = on
+            self.start_ticking()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if self.active or self._level > 0.01:
+            self.start_ticking()
 
     def on_frame(self, t):
-        target = 1.0 if self.active else 0.0
-        if not self.active and self._level < 0.01:
+        if t - self._last < 1 / 30:
             return
-        self._level += (target - self._level) * 0.15
+        self._last = t
+        target = 1.0 if self.active else 0.0
+        self._level += (target - self._level) * 0.25
+        if not self.active and self._level < 0.02:
+            self._level = 0.0
+            self.stop_ticking()
         self.update()
 
     def paintEvent(self, e):
@@ -844,22 +921,18 @@ class CountUpLabel(QLabel):
         self.setText(f"{int(round(self._value))}{self.suffix}")
 
 
-class StatusDot(TickingWidget):
+class StatusDot(QWidget):
+    """상태 점 (계속 깜빡이지 않음 — 조용하고 CPU도 안 씀)."""
+
     def __init__(self, color=C.success, parent=None):
         super().__init__(parent)
         self.color = QColor(color)
-        self.pulse = True
-        self._last = 0.0
         self.setFixedSize(14, 14)
 
-    def set_color(self, c, pulse=True):
-        self.color = QColor(c)
-        self.pulse = pulse
-        self.update()
-
-    def on_frame(self, t):
-        if self.pulse and t - self._last > 1 / 30:
-            self._last = t
+    def set_color(self, c, pulse=False):
+        c = QColor(c)
+        if c != self.color:
+            self.color = c
             self.update()
 
     def paintEvent(self, e):
@@ -867,13 +940,10 @@ class StatusDot(TickingWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         c = QPointF(self.width() / 2, self.height() / 2)
         p.setPen(Qt.PenStyle.NoPen)
-        if self.pulse:
-            k = (ticker().now() % 2.0) / 2.0
-            halo = QColor(self.color)
-            halo.setAlphaF(0.3 * (1 - k))
-            p.setBrush(halo)
-            r = 3 + 4 * ease_out_cubic(k)
-            p.drawEllipse(c, r, r)
+        halo = QColor(self.color)
+        halo.setAlphaF(0.18)
+        p.setBrush(halo)
+        p.drawEllipse(c, 6, 6)
         p.setBrush(self.color)
         p.drawEllipse(c, 3.5, 3.5)
 
@@ -924,8 +994,8 @@ def render_widget(w):
 
 class _RevealOverlay(TickingWidget):
     always_tick = False
-    DUR = 0.34
-    DIST = 10
+    DUR = 0.3
+    DIST = 8
 
     def __init__(self, stack, old_pix):
         super().__init__(stack)
@@ -942,11 +1012,22 @@ class _RevealOverlay(TickingWidget):
         targets = page.reveal_targets() if hasattr(page, "reveal_targets") else []
         if not targets:
             targets = collect_layout_widgets(page.layout()) or [page]
-        step = min(0.035, 0.2 / max(1, len(targets)))
+        try:
+            full = render_widget(page)
+            dpr = full.devicePixelRatio()
+            origin = page.mapTo(self.stack, QPoint(0, 0))
+        except Exception:
+            full = None
+        step = min(0.03, 0.15 / max(1, len(targets)))
         for i, w in enumerate(targets):
             try:
-                pos = w.mapTo(self.stack, QPoint(0, 0))
-                self.pieces.append((render_widget(w), QPointF(pos), 0.04 + i * step))
+                pos = w.mapTo(page, QPoint(0, 0))
+                if full is not None:
+                    piece = full.copy(int(pos.x() * dpr), int(pos.y() * dpr), int(w.width() * dpr), int(w.height() * dpr))
+                    piece.setDevicePixelRatio(dpr)
+                else:
+                    piece = render_widget(w)
+                self.pieces.append((piece, QPoint(pos.x() + origin.x(), pos.y() + origin.y()), 0.02 + i * step))
             except Exception:
                 pass
         self.t0 = time.monotonic()
@@ -966,20 +1047,20 @@ class _RevealOverlay(TickingWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         paint_app_background(p, QRectF(self.rect()))
         el = 0.0 if self.t0 is None else time.monotonic() - self.t0
         if self.old_pix is not None:
-            k = min(1.0, el / 0.12)
+            k = min(1.0, el / 0.1)
             if k < 1.0:
                 p.setOpacity(1 - k)
-                p.drawPixmap(QPointF(0, 0), self.old_pix)
+                p.drawPixmap(QPoint(0, 0), self.old_pix)
         for pm, pos, delay in self.pieces:
             k = (el - delay) / self.DUR
             if k <= 0:
                 continue
             p.setOpacity(min(1.0, k * 1.6))
-            p.drawPixmap(QPointF(pos.x(), pos.y() + self.DIST * (1 - ease_out_cubic(k))), pm)
+            # 정수 좌표로 그려야 확대·보간 없이 빠르다
+            p.drawPixmap(QPoint(pos.x(), pos.y() + round(self.DIST * (1 - ease_out_cubic(k)))), pm)
 
 
 class AnimatedStack(QStackedWidget):
@@ -1009,18 +1090,49 @@ class AnimatedStack(QStackedWidget):
 # 토스트
 # =====================================================================
 class _Toast(QWidget):
-    def __init__(self, host, text, kind):
+    def __init__(self, host, text, kind, action_text=None, on_action=None):
         super().__init__(host)
         self.text = text
         self.kind = kind
+        self.action_text = action_text
+        self.on_action = on_action
         self.k = 0.0
         self.out = False
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        fm = QFontMetricsF(font(14, QFont.Weight.Medium))
+        self._hover = False
+        if not action_text:
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        else:
+            self.setMouseTracking(True)
+        f = font(14, QFont.Weight.Medium)
+        fm = QFontMetricsF(f)
         lines = text.split("\n")
         w = max(fm.horizontalAdvance(l) for l in lines) + 66
+        if action_text:
+            w += QFontMetricsF(font(14, QFont.Weight.Bold)).horizontalAdvance(action_text) + 34
         h = max(48, int(fm.height() * len(lines) + 26))
-        self.resize(int(min(w, 560)), h)
+        self.resize(int(min(w, 620)), h)
+
+    def _action_rect(self):
+        if not self.action_text:
+            return QRectF()
+        aw = QFontMetricsF(font(14, QFont.Weight.Bold)).horizontalAdvance(self.action_text) + 24
+        return QRectF(self.width() - aw - 8, 8, aw, self.height() - 16)
+
+    def mouseMoveEvent(self, e):
+        hov = self._action_rect().contains(e.position())
+        if hov != self._hover:
+            self._hover = hov
+            self.setCursor(Qt.CursorShape.PointingHandCursor if hov else Qt.CursorShape.ArrowCursor)
+            self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def mousePressEvent(self, e):
+        if self.on_action and self._action_rect().contains(e.position()) and not self.out:
+            cb, self.on_action = self.on_action, None
+            cb()
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -1035,9 +1147,19 @@ class _Toast(QWidget):
             "bell": ("#FFA352", "bell"),
         }.get(self.kind, ("#C9D0D8", "info"))
         p.drawPixmap(QPointF(r.left() + 18, r.center().y() - 9), icons.pixmap(ic, col, 18))
+        right = 18
+        if self.action_text:
+            ar = self._action_rect()
+            right = self.width() - ar.left() + 6
+            if self._hover:
+                p.setBrush(qc("#FFFFFF", 0.10))
+                p.drawRoundedRect(ar, 8, 8)
+            p.setPen(QColor("#FFA352"))
+            p.setFont(font(14, QFont.Weight.Bold))
+            p.drawText(ar, Qt.AlignmentFlag.AlignCenter, self.action_text)
         p.setPen(QColor("#FFFFFF"))
         p.setFont(font(14, QFont.Weight.Medium))
-        p.drawText(r.adjusted(46, 0, -18, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text)
+        p.drawText(r.adjusted(46, 0, -right, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text)
 
 
 class ToastManager(QObject):
@@ -1052,16 +1174,23 @@ class ToastManager(QObject):
             self._layout()
         return False
 
-    def show(self, text, kind="info", ms=2400):
-        t = _Toast(self.host, text, kind)
+    def show(self, text, kind="info", ms=2400, action_text=None, on_action=None):
+        """action_text/on_action 을 주면 '되돌리기' 같은 버튼이 붙는다."""
+        t = None
+
+        def act():
+            on_action()
+            self._dismiss(t)
+        t = _Toast(self.host, text, kind, action_text, act if on_action else None)
         t.show()
         t.raise_()
         self.toasts.append(t)
         if len(self.toasts) > 3:
             self._dismiss(self.toasts[0])
         _anim(t, 0.0, 1.0, 260, lambda v, tt=t: self._set_k(tt, v)).start()
-        QTimer.singleShot(ms, lambda tt=t: self._dismiss(tt))
+        QTimer.singleShot(ms if not action_text else max(ms, 6000), lambda tt=t: self._dismiss(tt))
         self._layout()
+        return t
 
     def _set_k(self, t, v):
         try:
@@ -1072,7 +1201,7 @@ class ToastManager(QObject):
             pass
 
     def _dismiss(self, t):
-        if t not in self.toasts or t.out:
+        if t is None or t not in self.toasts or t.out:
             return
         t.out = True
         _anim(t, t.k, 0.0, 200, lambda v, tt=t: self._set_k(tt, v), QEasingCurve.Type.InCubic,

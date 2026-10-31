@@ -3,10 +3,12 @@ from pathlib import Path
 
 from PyQt6.QtCore import QPoint, QRectF, Qt, QTime, QTimer, QVariantAnimation
 from PyQt6.QtGui import QPainter
-from PyQt6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+from PyQt6.QtWidgets import (QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                              QMainWindow, QScrollArea, QSlider, QSpinBox, QTimeEdit, QVBoxLayout, QWidget)
 
-from app.core.timeutil import mask_to_days
+from app.core.timeutil import ampm, mask_to_days
+from app.ui.select import Select
+from app.ui.timepicker import TimePicker
 from app.ui.theme import C, paint_soft_shadow, qc
 from app.ui.widgets import (Button, DayChips, IconButton, SegmentedControl, SlideBar, ToggleSwitch, _anim, field_label,
                             hline, muted_label)
@@ -15,14 +17,34 @@ SHADOW = 22
 
 
 class _Dim(QWidget):
-    """대화상자가 열려 있는 동안 메인 창을 살짝 어둡게."""
+    """대화상자가 열려 있는 동안 메인 창을 살짝 어둡게.
+
+    어두워지는(밝아지는) 동안에는 뒤 화면을 한 번 찍어 둔 그림 위에 어둠만 덧칠한다.
+    그래야 애니메이션의 매 장면마다 메인 창 전체를 다시 그리지 않아 끊기지 않는다."""
 
     def __init__(self, host):
         super().__init__(host)
         self.k = 0.0
+        self._snap = None
         self.setGeometry(host.rect())
+        self.freeze()
         self.show()
         self.raise_()
+
+    def freeze(self):
+        try:
+            self.hide()
+            self._snap = self.parentWidget().grab()
+            self.show()
+            self.raise_()
+            self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        except Exception:
+            self._snap = None
+
+    def thaw(self):
+        self._snap = None
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+        self.update()
 
     def set_k(self, v):
         self.k = float(v)
@@ -30,6 +52,8 @@ class _Dim(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
+        if self._snap is not None:
+            p.drawPixmap(0, 0, self._snap)
         p.fillRect(self.rect(), qc("#000000", 0.28 * self.k))
 
 
@@ -123,6 +147,15 @@ class BaseDialog(QDialog):
         self._drag = None
         super().mouseReleaseEvent(e)
 
+    # 검색칸이 있는 창은 False: 입력칸의 Enter가 '닫기' 같은 기본 버튼을 누르지 않고 그 칸의 일(검색)만 한다
+    enter_accepts = True
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not self.enter_accepts:
+            e.accept()
+            return
+        super().keyPressEvent(e)
+
     # ---------- 열고 닫기 ----------
     def showEvent(self, e):
         super().showEvent(e)
@@ -133,7 +166,8 @@ class BaseDialog(QDialog):
             self.move(g.center().x() - self.width() // 2, g.center().y() - self.height() // 2)
         if isinstance(host, QMainWindow) and host.centralWidget() is not None and self._dim is None:
             self._dim = _Dim(host.centralWidget())
-            _anim(self._dim, 0.0, 1.0, 180, self._dim.set_k).start()
+            dim = self._dim
+            _anim(dim, 0.0, 1.0, 180, dim.set_k, on_done=dim.thaw).start()
         end = self.pos()
         start = end + QPoint(0, 12)
         self.setWindowOpacity(0.0)
@@ -150,6 +184,7 @@ class BaseDialog(QDialog):
             dim = self._dim
             self._dim = None
             try:
+                dim.freeze()
                 _anim(dim, dim.k, 0.0, 150, dim.set_k, on_done=dim.deleteLater).start()
             except RuntimeError:
                 pass
@@ -245,7 +280,7 @@ class VolumeField(QWidget):
 
 
 def _sound_combo(sounds, current=None):
-    cb = QComboBox()
+    cb = Select()
     for s in sounds:
         cb.addItem(str(s["name"]), int(s["id"]))
     if current is not None:
@@ -271,19 +306,24 @@ class ScheduleDialog(BaseDialog):
         self.days = DayChips()
         self.body.addWidget(_row("요일", self.days))
 
-        trow = QHBoxLayout()
-        trow.setSpacing(6)
-        self.time_edit = QTimeEdit()
-        self.time_edit.setDisplayFormat("HH:mm")
+        tcol = QVBoxLayout()
+        tcol.setSpacing(10)
+        self.time_edit = TimePicker()
         self.time_edit.setTime(QTime(9, 0))
-        self.time_edit.setFixedWidth(120)
-        trow.addWidget(self.time_edit)
-        for txt, mins in (("-5분", -5), ("+5분", 5), ("+10분", 10)):
+        tcol.addWidget(self.time_edit)
+        qrow = QHBoxLayout()
+        qrow.setSpacing(6)
+        for txt, mins in (("-5분", -5), ("+5분", 5), ("+10분", 10), ("+1시간", 60)):
             b = Button(txt, variant="secondary", size="sm")
-            b.clicked.connect(lambda _=False, m=mins: self.time_edit.setTime(self.time_edit.time().addSecs(m * 60)))
-            trow.addWidget(b)
-        trow.addStretch(1)
-        self.body.addWidget(_row("시간", trow))
+            b.clicked.connect(lambda _=False, m=mins: self.time_edit.add_minutes(m))
+            qrow.addWidget(b)
+        hint = QLabel("칸을 누르고 숫자를 바로 쳐도 돼요")
+        hint.setStyleSheet(f"color: {C.grey500}; font-size: 12.5px;")
+        qrow.addSpacing(6)
+        qrow.addWidget(hint)
+        qrow.addStretch(1)
+        tcol.addLayout(qrow)
+        self.body.addWidget(_row("시간", tcol))
 
         srow = QHBoxLayout()
         srow.setSpacing(6)
@@ -389,7 +429,7 @@ class BatchEditDialog(BaseDialog):
         self.rows = rows
         self.btn_ok.setText("바꾸기")
 
-        names = ", ".join(f"{r['time_hhmm']} {r['name']}" for r in rows[:4]) + (f" 외 {n - 4}개" if n > 4 else "")
+        names = ", ".join(f"{ampm(r['time_hhmm'])} {r['name']}" for r in rows[:4]) + (f" 외 {n - 4}개" if n > 4 else "")
         preview = QLabel(names)
         preview.setWordWrap(True)
         preview.setStyleSheet(f"color: {C.grey700}; font-size: 13px; background: {C.grey50};"
@@ -467,7 +507,7 @@ class BatchEditDialog(BaseDialog):
         nl.addWidget(self.repl_edit, 0, 2)
         self.sec_name = _Section("이름", "이름 일부를 찾아 바꿔요", nl, self._update_summary)
 
-        self.set_combo = QComboBox()
+        self.set_combo = Select()
         for s in sets:
             self.set_combo.addItem(str(s["name"]), int(s["id"]))
         i = self.set_combo.findData(int(current_set_id))
@@ -545,7 +585,7 @@ class DuplicateDialog(BaseDialog):
     def __init__(self, count, sets, current_set_id, parent=None):
         super().__init__(f"일정 {count}개 복제", "", None, parent, 440)
         self.btn_ok.setText("복제")
-        self.set_combo = QComboBox()
+        self.set_combo = Select()
         for s in sets:
             self.set_combo.addItem(str(s["name"]), int(s["id"]))
         i = self.set_combo.findData(int(current_set_id))

@@ -116,6 +116,32 @@ class TextDelegate(_Base):
         p.restore()
 
 
+class TimeDelegate(_Base):
+    """'14:05' → 작게 '오후' + 굵게 '2:05'."""
+
+    def paint(self, p, opt, idx):
+        text = self._bg(p, opt, idx)
+        try:
+            h, m = (int(x) for x in str(text).split(":")[:2])
+        except ValueError:
+            return
+        p.save()
+        col = idx.data(Qt.ItemDataRole.ForegroundRole)
+        main = col.color() if col is not None else QColor(C.grey900)
+        x = opt.rect.left() + 12
+        r = QRect(x, opt.rect.top(), opt.rect.width() - 18, opt.rect.height())
+        part = "오전" if h < 12 else "오후"
+        p.setFont(font(12.5, QFont.Weight.Medium))
+        p.setPen(QColor(C.grey400) if main.name().lower() == QColor(C.grey400).name() else QColor(C.grey500))
+        p.drawText(r, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, part)
+        pw = p.fontMetrics().horizontalAdvance(part) + 5
+        p.setFont(font(15, QFont.Weight.DemiBold))
+        p.setPen(main)
+        p.drawText(r.adjusted(pw, 0, 0, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                   f"{h % 12 or 12}:{m:02d}")
+        p.restore()
+
+
 class SmartTable(QTableWidget):
     selectionCountChanged = pyqtSignal(int)
 
@@ -250,16 +276,22 @@ class SmartTable(QTableWidget):
             self._timer.stop()
         self.viewport().update()
 
+    def _update_row(self, r):
+        if r is not None and r >= 0:
+            self.viewport().update(0, self.rowViewportPosition(r), self.viewport().width(), self.rowHeight(r))
+
     def mouseMoveEvent(self, e):
         r = self.rowAt(int(e.position().y()))
         if r != self._hover_row:
-            self._hover_row = r
-            self.viewport().update()
+            # 표 전체가 아니라 바뀐 두 줄만 다시 그린다
+            old, self._hover_row = self._hover_row, r
+            self._update_row(old)
+            self._update_row(r)
         super().mouseMoveEvent(e)
 
     def leaveEvent(self, e):
-        self._hover_row = -1
-        self.viewport().update()
+        old, self._hover_row = self._hover_row, -1
+        self._update_row(old)
         super().leaveEvent(e)
 
     def paintEvent(self, e):

@@ -56,6 +56,35 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pyinstaller pillow
 
+      # YouTube 봇 확인을 통과하는 증명값(PO 토큰) 생성기. 버전을 고정하고 GitHub가 알려 주는 SHA-256과 맞는지 확인한다.
+      - name: Get PO token helper (bgutil-pot)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          POT_REPO: jim60105/bgutil-ytdlp-pot-provider-rs
+          POT_VERSION: v0.8.1
+          POT_ASSET: bgutil-pot-windows-x86_64.exe
+        run: |
+          set -euo pipefail
+          mkdir -p build/bin
+          gh release download "$POT_VERSION" -R "$POT_REPO" -p "$POT_ASSET" -D build/bin --clobber
+          expected=$(gh api "repos/$POT_REPO/releases/tags/$POT_VERSION" --jq ".assets[] | select(.name==\"$POT_ASSET\") | .digest")
+          actual="sha256:$(sha256sum "build/bin/$POT_ASSET" | cut -d' ' -f1)"
+          echo "expected: $expected"
+          echo "actual:   $actual"
+          if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+            echo "bgutil-pot 체크섬이 맞지 않아요"; exit 1
+          fi
+          mv "build/bin/$POT_ASSET" build/bin/bgutil-pot.exe
+          ./build/bin/bgutil-pot.exe --version
+
+      - name: YouTube smoke test (결과만 표시)
+        continue-on-error: true
+        timeout-minutes: 6
+        env:
+          MAPL_BGUTIL_POT: build/bin/bgutil-pot.exe
+        run: python tools/yt_smoke.py
+
       - name: Build
         run: python tools/build.py
 
@@ -82,3 +111,11 @@ jobs:
         run: |
           gh release create "desktop-v${VERSION}" dist/installer/MaplTajong-Setup-*.exe dist/installer/*.sha256 \
             --target "$GITHUB_SHA" --title "마고 타종 ${VERSION} (Windows)" --notes-file release_notes.md
+
+      # 배포가 끝난 임시 release 브랜치는 지운다 (릴리스와 태그에 그대로 남아 있음)
+      - name: Clean up release branches
+        if: env.PUBLISH == '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/cleanup_release_branches.sh

@@ -1,17 +1,21 @@
-from PyQt6.QtCore import QTimer
+from datetime import datetime
+
+from PyQt6.QtCore import QDateTime, Qt, QTimer
 from PyQt6.QtGui import QAction, QCursor, QIcon
-from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QMenu, QSystemTrayIcon, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QSystemTrayIcon, QWidget
 
 from app.core.paths import asset_path
 from app.core.player import SoundPlayer
 from app.core.scheduler import Scheduler
-from app.core.version import APP_TITLE, APP_VERSION, DEVELOPER
+from app.core.timeutil import ampm
+from app.core.version import APP_TITLE, APP_VERSION
 from app.ui import icons
 from app.ui.context import AppContext
 from app.core.updater import notes_to_text
 from app.ui.dialogs import confirm, notify
 from app.ui.fullscreen_clock import FullscreenClock
 from app.ui.nav import NavSidebar
+from app.ui.select import Menu
 from app.ui.pages.dashboard import DashboardPage
 from app.ui.pages.logs import LogsPage
 from app.ui.pages.schedules import SchedulesPage
@@ -35,7 +39,7 @@ class MainWindow(QMainWindow):
         self._fullscreen = None
         self._really_quit = False
 
-        self.setWindowTitle(f"{APP_TITLE} {APP_VERSION} - {DEVELOPER} 개발")
+        self.setWindowTitle(f"{APP_TITLE} {APP_VERSION}")
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -71,10 +75,13 @@ class MainWindow(QMainWindow):
         self._init_tray()
         self._init_window_icon()
 
+        # 초가 바뀌는 순간에 맞춰 1초에 한 번 (종 시각에 더 정확하고, 불필요하게 깨어나지 않음)
         self.timer = QTimer(self)
-        self.timer.setInterval(250)
-        self.timer.timeout.connect(self.on_tick)
-        self.timer.start()
+        self.timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self._on_timer)
+        self._tooltip = ""
+        self._on_timer()
 
         self.setMinimumSize(1060, 700)
         self._revealed = False
@@ -91,6 +98,10 @@ class MainWindow(QMainWindow):
         if not got:
             return
         version, notes = got
+        from app.ui.changelog_dialog import ChangelogDialog, notes_for
+        if notes_for(version):
+            ChangelogDialog(self, only_version=version, title=f"{version} 버전으로 업데이트했어요").exec()
+            return
         text = notes_to_text(notes) or "더 안정적으로 다듬었어요."
         notify(self, f"{version} 버전으로 업데이트했어요", text)
 
@@ -105,7 +116,7 @@ class MainWindow(QMainWindow):
     def _init_tray(self):
         self.tray = QSystemTrayIcon(self._app_icon(), self)
         self.tray.setToolTip("Mapl Tajong")
-        menu = QMenu()
+        menu = Menu()
         for text, ic, fn in (("열기", "dashboard", self._tray_show), ("숨기기", "x", self.hide),
                              ("전체화면 시계", "fullscreen", self.open_fullscreen)):
             a = QAction(icons.icon(ic, C.text), text, self)
@@ -145,18 +156,24 @@ class MainWindow(QMainWindow):
         event.ignore()
 
     # ---------------- 주기 작업 ----------------
+    def _on_timer(self):
+        self.on_tick()
+        self.timer.start(1000 - QDateTime.currentDateTime().time().msec() + 10)
+
     def on_tick(self):
         self.scheduler.tick()
         ev = self.scheduler.next_event
-        if ev:
-            self.tray.setToolTip(f"Mapl Tajong\n다음: {ev.run_at.strftime('%H:%M')} {ev.name}")
-        else:
-            self.tray.setToolTip("Mapl Tajong\n예정된 종 없음")
+        nxt = (ev.run_at - datetime.now()).total_seconds() if ev else None
+        self.player.idle_tick(nxt)
+        tip = f"Mapl Tajong\n다음: {ampm(ev.run_at)} {ev.name}" if ev else "Mapl Tajong\n예정된 종 없음"
+        if tip != self._tooltip:
+            self._tooltip = tip
+            self.tray.setToolTip(tip)
 
     def open_fullscreen(self):
         screens = self.app.screens()
         if len(screens) > 1:
-            m = QMenu(self)
+            m = Menu(self)
             for i, s in enumerate(screens):
                 g = s.geometry()
                 act = m.addAction(icons.icon("fullscreen", C.text), f"화면 {i + 1}  ({g.width()}×{g.height()})")

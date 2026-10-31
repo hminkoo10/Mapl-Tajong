@@ -264,6 +264,24 @@ def has_override(conn, date_yyyymmdd, schedule_id, action):
     return row is not None
 
 
+def remove_override(conn, date_yyyymmdd, schedule_id, action):
+    cur = conn.execute("DELETE FROM overrides WHERE date_yyyymmdd=? AND schedule_id=? AND action=?",
+                       (date_yyyymmdd, int(schedule_id), action))
+    conn.commit()
+    return cur.rowcount
+
+
+def overrides_between(conn, start_yyyymmdd, end_yyyymmdd):
+    """{(날짜, 일정 id): {동작, ...}} — 여러 날의 1회성 기록을 한 번에 읽는다."""
+    rows = conn.execute(
+        "SELECT date_yyyymmdd, schedule_id, action FROM overrides WHERE date_yyyymmdd BETWEEN ? AND ?",
+        (start_yyyymmdd, end_yyyymmdd)).fetchall()
+    out = {}
+    for r in rows:
+        out.setdefault((str(r[0]), int(r[1])), set()).add(str(r[2]))
+    return out
+
+
 def has_skip_once(conn, date_yyyymmdd, schedule_id):
     return has_override(conn, date_yyyymmdd, schedule_id, "SKIP_ONCE")
 

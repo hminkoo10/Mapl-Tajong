@@ -1,0 +1,118 @@
+# Android 앱 빌드·배포
+#   - claude/** 브랜치에 android/ 가 바뀌면: APK 를 빌드해 Actions 결과물로 올린다 (배포는 안 함)
+#   - release/android-vX.Y.Z 브랜치를 만들면: 빌드 → GitHub Release(태그 android-vX.Y.Z)에 APK 를 올린다
+# 서명 키는 저장소 비밀값 ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD 로 넣는다.
+# 비밀값이 없으면 시험용(디버그) 키로 서명한다.
+name: Android
+
+on:
+  push:
+    branches: ["claude/**", "release/android-v*"]
+    paths: ["android/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Read version
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=$(grep '^versionName=' version.properties | cut -d= -f2)
+          code=$(grep '^versionCode=' version.properties | cut -d= -f2)
+          publish=0
+          case "$GITHUB_REF" in
+            refs/heads/release/*)
+              want="${GITHUB_REF#refs/heads/release/}"
+              if [ "$want" != "android-v$name" ]; then
+                echo "$want 와 version.properties 의 버전($name)이 달라요"; exit 1
+              fi
+              publish=1 ;;
+          esac
+          echo "VERSION=$name" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$code" >> "$GITHUB_ENV"
+          echo "PUBLISH=$publish" >> "$GITHUB_ENV"
+
+      - name: Signing key
+        shell: bash
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "${KS_B64:-}" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "서명 키: 저장소 비밀값"
+          else
+            echo "서명 키: 시험용(디버그) 키"
+          fi
+
+      - name: Build APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp app/build/outputs/apk/release/*.apk "out/MaplTajong-${VERSION}.apk"
+          (cd out && sha256sum "MaplTajong-${VERSION}.apk" > "MaplTajong-${VERSION}.apk.sha256")
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MaplTajong-android-${{ env.VERSION }}
+          path: android/out/*
+
+      - name: Release notes
+        if: env.PUBLISH == '1'
+        shell: python
+        run: |
+          import os, re
+          v = os.environ["VERSION"]
+          path = "CHANGELOG.md" if os.path.exists("CHANGELOG.md") else "../CHANGELOG.md"
+          text = open(path, encoding="utf-8").read()
+          m = re.search(rf"^##\s*\[?{re.escape(v)}\]?[^\n]*\n(.*?)(?=^##\s|\Z)", text, re.M | re.S)
+          body = m.group(1).strip() if m else "더 안정적으로 다듬었어요."
+          open("release_notes.md", "w", encoding="utf-8").write(body + "\n")
+
+      - name: Publish GitHub Release
+        if: env.PUBLISH == '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "android-v${VERSION}" out/MaplTajong-${VERSION}.apk out/MaplTajong-${VERSION}.apk.sha256 \
+            --target "$GITHUB_SHA" --title "마고 타종 ${VERSION} (Android)" --notes-file release_notes.md --latest=false
+
+      - name: Clean up release branches
+        if: env.PUBLISH == '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash ../tools/cleanup_release_branches.sh

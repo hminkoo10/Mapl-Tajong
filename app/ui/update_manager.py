@@ -1,5 +1,7 @@
-"""업데이트 흐름 관리: 주기적 확인 → 받기 → 종이 울리지 않는 때에 설치."""
+"""업데이트 흐름 관리: 주기적 확인 → 받기 → 아무도 쓰지 않고 종도 멀었을 때 설치."""
+import sys
 import threading
+import time
 from datetime import datetime
 
 from PyQt6.QtCore import QObject, QThread, QTimer, QUrl, pyqtSignal
@@ -13,6 +15,26 @@ from app.ui.workers import keep_alive, run_async
 CHECK_EVERY_MS = 6 * 60 * 60 * 1000
 FIRST_CHECK_MS = 60 * 1000
 SAFE_GAP_MIN = 10  # 다음 종까지 이 시간 이상 남았을 때만 자동 설치
+IDLE_MIN = 5       # 컴퓨터를 이 시간 이상 아무도 만지지 않았을 때만 자동 설치
+
+
+def idle_seconds():
+    """키보드·마우스를 마지막으로 쓴 뒤 지난 시간(초). 알 수 없으면 None."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+
+        class LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+        lii = LASTINPUTINFO()
+        lii.cbSize = ctypes.sizeof(lii)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+            return None
+        now = ctypes.windll.kernel32.GetTickCount() & 0xFFFFFFFF
+        return ((now - lii.dwTime) & 0xFFFFFFFF) / 1000.0
+    except Exception:
+        return None
 
 
 class _DownloadThread(QThread):
@@ -52,6 +74,8 @@ class UpdateManager(QObject):
         self._install_after = False
         self._dl = None
         self._installing = False
+        self._nagged = False
+        self._last_touch = time.monotonic()
         self.installed = updater.is_installed()
 
         self._check_timer = QTimer(self)
@@ -156,10 +180,28 @@ class UpdateManager(QObject):
             self._try_auto_install()
 
     # ---------- 설치 ----------
+    def touch(self):
+        """프로그램 화면을 쓰는 중임을 알린다 (Windows가 아닐 때의 유휴 판단용)."""
+        self._last_touch = time.monotonic()
+
+    def user_away(self):
+        """아무도 컴퓨터를 쓰고 있지 않은지. 쓰는 중에 갑자기 꺼지지 않도록."""
+        idle = idle_seconds()
+        if idle is None:
+            idle = time.monotonic() - self._last_touch
+        return idle >= IDLE_MIN * 60
+
     def is_safe_now(self):
         """종을 울리는 중이 아니고, 다음 종까지 충분히 남았는지."""
         if self.ctx.player.is_playing():
             return False
+        win = getattr(self.ctx, "window", None)
+        if win is not None and getattr(win, "_fullscreen", None) is not None:
+            try:
+                if win._fullscreen.isVisible():
+                    return False     # 교실 화면에 시계를 띄워 둔 동안은 미룬다
+            except RuntimeError:
+                pass
         ev = self.ctx.scheduler.next_event
         if ev is None:
             return True
@@ -169,6 +211,12 @@ class UpdateManager(QObject):
         if self.state != "ready" or not self.auto or self._installing:
             return
         if not self.is_safe_now():
+            return
+        if not self.user_away():
+            if not self._nagged:
+                self._nagged = True
+                self.ctx.toast(f"새 버전 {self.info.version}이 준비됐어요. 컴퓨터를 쓰지 않을 때 설치할게요.", "info",
+                               8000, "지금 설치", self.install_now)
             return
         self._safe_timer.stop()
         self.ctx.toast(f"{self.info.version} 버전으로 업데이트할게요. 잠깐 꺼졌다 다시 켜져요.", "info", 5000)
@@ -187,16 +235,16 @@ class UpdateManager(QObject):
             return
         if self.state == "ready":
             self._installing = True
-            self._do_install()
+            self._do_install(visible=True)
 
-    def _do_install(self):
+    def _do_install(self, visible=False):
         if not self.path or self.info is None:
             self._installing = False
             return
         repo.set_setting(self.conn, "update_pending_version", self.info.version)
         repo.set_setting(self.conn, "update_pending_notes", self.info.notes[:4000])
         try:
-            updater.launch_installer(self.path)
+            updater.launch_installer(self.path, visible=visible)
         except Exception as e:
             self._installing = False
             self._set("ready", str(e))
