@@ -45,16 +45,20 @@
 - 패키지 이름은 예전 앱과 같은 `com.milky.mataf`. 서명 키가 다르면 예전 앱을 지우고 설치해야 해요.
 
 ### 서명 키
-- 예전 앱은 `CN=Hyunmin Koo` 키로 서명돼 있어요. 키 파일(.jks/.keystore) 위치를 아직 못 찾았어요.
-  - Android Studio → Build → Generate Signed Bundle/APK 화면의 "Key store path"에 마지막으로 쓴 경로가 보여요.
-- 찾으면 GitHub 저장소 Settings → Secrets에 넣어요: `ANDROID_KEYSTORE_BASE64`(파일을 base64로), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`.
-- 비밀값이 없으면 CI는 시험용(디버그) 키로 서명해요. 로컬에서도 같은 환경 변수(`ANDROID_KEYSTORE_FILE` 등)를 주면 그 키로 서명해요.
-- **자동 업데이트는 같은 키로 서명된 APK끼리만 돼요.** 첫 릴리스 전에 키를 정해 두지 않으면, 나중에 키를 바꿀 때 모두 지우고 다시 설치해야 해요.
+- 2026-11-01에 배포용 키를 새로 만들었어요: `Documents\Mago\android-signing\mapltajong-release.jks` (별칭 `mapltajong`, 비밀번호는 같은 폴더 `password.txt`).
+  인증서 SHA-256 `72:C4:EB:6B:E1:54:33:C8:CF:CD:3B:70:64:AE:04:90:34:24:A1:41:26:DD:06:1B:73:30:54:E7:77:5F:FC:DA`.
+- 같은 값이 GitHub 저장소 비밀값 `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`에 들어 있어요.
+- **이 키를 잃어버리면 설치된 앱을 더는 자동 업데이트할 수 없어요.** 폴더를 다른 곳에도 따로 보관하고, 저장소에는 절대 넣지 않아요.
+- 예전 앱은 다른 키(`CN=Hyunmin Koo`, 파일 못 찾음)로 서명돼 있어서, 예전 앱이 깔린 기기는 한 번 지우고 새로 설치해야 해요.
+- 로컬에서도 환경 변수(`ANDROID_KEYSTORE_FILE`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`)를 주면 이 키로 서명해요. 없으면 시험용(디버그) 키예요.
 
 ### 배포
 - `dev/**` 브랜치에 `android/`가 바뀌면 CI가 APK를 빌드해서 Actions 결과물로 올려요(배포는 안 함).
-- `release/android-vX.Y.Z` 브랜치를 만들면 CI가 빌드해서 GitHub Release `android-vX.Y.Z`에 APK(`MaplTajong-X.Y.Z.apk`)와 sha256을 올리고 브랜치를 지워요.
-  브랜치 이름과 `version.properties`의 버전이 다르면 멈춰요. 릴리스 노트는 `android/CHANGELOG.md`의 같은 버전 항목이에요.
+- **main에 `android/`가 바뀌어 올라오면**, `version.properties`의 버전이 아직 릴리스되지 않았을 때만 CI가 빌드해서
+  GitHub Release `android-vX.Y.Z`에 APK(`MaplTajong-X.Y.Z.apk`)와 sha256을 올려요. 이미 있는 버전이면 빌드만 해요.
+  → 새 버전을 내려면 `version.properties`(versionName, versionCode 둘 다 올리기)와 `CHANGELOG.md`를 고쳐서 main에 넣으면 돼요.
+- `release/android-vX.Y.Z` 브랜치나 `android-vX.Y.Z` 태그로도 배포할 수 있어요. 이름과 `version.properties`의 버전이 다르면 멈춰요.
+- 배포용 서명 키 비밀값이 없으면 배포하지 않고 멈춰요. 릴리스 노트는 `android/CHANGELOG.md`의 같은 버전 항목이에요.
 - 안드로이드 릴리스는 `--latest=false`로 올려서 데스크톱 "최신 릴리스"를 가리지 않아요. 데스크톱 업데이트는 설치 파일 이름으로만 릴리스를 고르니까 섞여도 괜찮아요.
 
 ## 파일 지도 (`android/app/src/main/java/com/milky/mataf/`)
