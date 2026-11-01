@@ -56,6 +56,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.milky.mataf.core.AppEvents
+import com.milky.mataf.core.Cloud
 import com.milky.mataf.core.Scheduler
 import com.milky.mataf.core.TodayEvent
 import com.milky.mataf.core.Weather
@@ -102,7 +103,12 @@ class FullscreenActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-        setContent { MatafTheme { FullscreenClock(onClose = { finish() }) } }
+        setContent {
+            // 로그아웃하거나 로그인이 끝나면 시계를 닫고 앱의 로그인 화면으로
+            val cloud by Cloud.status.collectAsState()
+            if (!cloud.loggedIn) LaunchedEffect(Unit) { finish() }
+            MatafTheme { FullscreenClock(onClose = { finish() }) }
+        }
     }
 }
 

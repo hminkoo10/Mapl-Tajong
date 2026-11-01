@@ -91,10 +91,19 @@ class RingReceiver : BroadcastReceiver() {
     }
 }
 
-/** 부팅·앱 업데이트·시간 변경 뒤에 다음 종을 다시 걸고, 필요하면 클라우드 연결 서비스를 켠다. */
+/**
+ * 부팅·앱 업데이트·시간 변경 뒤에 다음 종을 다시 걸고, 필요하면 클라우드 연결 서비스를 켠다.
+ * 로그인하지 않아서 울리지 못하는 종이 있으면 (예: 로그인이 필요해진 버전으로 업데이트) 알림으로 알린다.
+ */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         Alarms.reschedule(ctx)
         CloudService.sync(ctx)
+        if (!Cloud.isLoggedIn() && (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED)) {
+            val repo = Repo(ctx)
+            if (!Scheduler.isPaused(repo) && Scheduler.next(repo) != null) {
+                CloudService.notifyLogin(ctx, "마고에듀 통합 클라우드에 로그인해야 이 기기에서 종이 울려요. 앱을 열어 로그인해 주세요.")
+            }
+        }
     }
 }

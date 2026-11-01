@@ -189,7 +189,9 @@ object CloudEvents {
 class CloudService : Service() {
     companion object {
         const val CHANNEL = "cloud"
+        private const val CHANNEL_LOGIN = "cloud_login"
         private const val NOTIF_ID = 4102
+        private const val NOTIF_LOGIN = 4103
 
         fun createChannel(ctx: Context) {
             val nm = ctx.getSystemService(NotificationManager::class.java)
@@ -197,6 +199,32 @@ class CloudService : Service() {
                 description = "다른 기기에서 울려 달라고 하면 바로 울리려고 연결해 둘 때 보여요"
                 setShowBadge(false)
             })
+            nm.createNotificationChannel(NotificationChannel(CHANNEL_LOGIN, "클라우드 로그인", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "로그인이 끝나서 이 기기에서 종을 울리지 못할 때 알려요"
+            })
+        }
+
+        /** 로그인하지 않아서 종을 울리지 못한다고 알린다 (누르면 앱의 로그인 화면) */
+        fun notifyLogin(ctx: Context, text: String) {
+            val open = PendingIntent.getActivity(ctx, 1, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val n = NotificationCompat.Builder(ctx, CHANNEL_LOGIN)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle("마고 타종")
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build()
+            try {
+                ctx.getSystemService(NotificationManager::class.java).notify(NOTIF_LOGIN, n)
+            } catch (_: Exception) {
+                // 알림 권한이 없으면 앱을 열 때 로그인 화면이 보인다
+            }
+        }
+
+        fun cancelLoginNotice(ctx: Context) {
+            ctx.getSystemService(NotificationManager::class.java).cancel(NOTIF_LOGIN)
         }
 
         private fun wanted(ctx: Context) = Cloud.isLoggedIn() && Cloud.ringsHere(Repo(ctx))

@@ -118,7 +118,12 @@ object Cloud {
 
     fun credentials(): Pair<String, String>? = token?.let { server to it }
 
-    fun ringsHere(repo: Repo): Boolean = repo.setting(K_RING, "1") != "0"
+    /** 이 기기에서 종을 울리는지: 클라우드에 로그인해 있고 '이 기기에서 종 울리기'가 켜져 있을 때만 */
+    fun ringsHere(repo: Repo): Boolean = token != null && repo.setting(K_RING, "1") != "0"
+
+    /** 로그인 화면의 '이 기기에서 종 울리기' 처음 값: 이 기기에서 로그인한 적이 있으면 그때 고른 것, 처음이면 꺼짐 */
+    fun ringChoiceForLogin(repo: Repo): Boolean =
+        repo.setting(K_USERNAME, "").isNotEmpty() && repo.setting(K_RING, "1") != "0"
 
     fun setRingsHere(ctx: Context, on: Boolean) {
         Repo(ctx).setSetting(K_RING, if (on) "1" else "0")
@@ -776,7 +781,7 @@ object Cloud {
         }
     }
 
-    /** 다른 계정이거나 로그아웃할 때: 맞춘 기록과 다른 기기 기록을 지운다 (이 기기 시간표는 그대로) */
+    /** 다른 계정으로 로그인할 때: 맞춘 기록과 다른 기기 기록을 지운다 (이 기기 시간표는 그대로) */
     private fun resetLocal() {
         sync = SyncState()
         stateFile().delete()
@@ -821,37 +826,44 @@ object Cloud {
                 lastSync = repo.setting(K_LAST_SYNC, "").toLongOrNull() ?: 0)
         }
         accountChanged()
+        CloudService.cancelLoginNotice(app)
         schedule(Work.FULL, 0)
         null
     }
 
-    /** 로그아웃: 이 기기 데이터는 그대로 두고, 다시 이 기기에서 종을 울린다 */
+    /**
+     * 로그아웃: 로그인 화면으로 돌아가고, 다시 로그인할 때까지 이 기기에서 종을 울리지 않는다.
+     * 이 기기 시간표·종소리와 맞춘 기록은 그대로 둬서 같은 계정으로 다시 로그인하면 이어서 맞춘다.
+     */
     suspend fun logout() = withContext(Dispatchers.IO) {
         val t = token
         val srv = server
         token = null
         lock.withLock {
-            val repo = Repo(app)
-            repo.setSetting(K_TOKEN, "")
-            repo.setSetting(K_RING, "1")
-            resetLocal()
-            _status.value = Status(loggedIn = false, server = srv, username = repo.setting(K_USERNAME, ""))
+            Repo(app).setSetting(K_TOKEN, "")
+            synchronized(due) { due.clear() }
+            _choice.value = null
+            pendingRemote = null
+            _status.value = _status.value.copy(loggedIn = false, conn = Conn.OFF, syncing = false, message = "")
         }
         accountChanged()
         if (t != null) runCatching { CloudApi(srv, t).logout() }
     }
 
-    /** 세션이 끝났을 때(401): 로그인만 풀고, 맞춘 기록과 '이 기기에서 종 울리기'는 그대로 둔다 */
+    /** 세션이 끝났을 때(401): 로그아웃과 같이 로그인 화면으로 돌아가고, 종을 울리지 않게 된 것을 알림으로 알린다 */
     fun unauthorized(message: String) {
         if (token == null) return
+        val rang = ringsHere(Repo(app))
         token = null
         Repo(app).setSetting(K_TOKEN, "")
+        synchronized(due) { due.clear() }
         _choice.value = null
         pendingRemote = null
         _status.value = _status.value.copy(loggedIn = false, conn = Conn.OFF, syncing = false,
             message = message.ifBlank { "로그인이 끝났어요. 다시 로그인해 주세요." })
         accountChanged()
-        Toasts.show("클라우드 로그인이 끝났어요. 설정에서 다시 로그인해 주세요.", "warning")
+        CloudService.notifyLogin(app, if (rang) "로그인이 끝나서 이 기기에서 종을 울리지 않아요. 다시 로그인해 주세요."
+            else "클라우드 로그인이 끝났어요. 다시 로그인해 주세요.")
     }
 
     private fun accountChanged() {

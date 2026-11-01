@@ -392,7 +392,10 @@ object Updates {
     /** 종을 울리는 중이 아니고, 교실 화면에 시계를 띄워 두지 않았고, 다음 종까지 충분히 남았는지 */
     fun isSafeNow(ctx: Context): Boolean {
         if (BellService.ringing.value != null || FullscreenActivity.showing) return false
-        val next = Scheduler.next(Repo(ctx)) ?: return true
+        // 로그아웃했거나 이 기기에서 종을 울리지 않으면 기다릴 종이 없다
+        val repo = Repo(ctx)
+        if (!Cloud.ringsHere(repo)) return true
+        val next = Scheduler.next(repo) ?: return true
         return Duration.between(LocalDateTime.now(), next.runAt).toMinutes() >= SAFE_GAP_MIN
     }
 

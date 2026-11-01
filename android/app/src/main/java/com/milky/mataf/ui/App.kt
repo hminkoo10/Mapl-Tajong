@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +53,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.milky.mataf.R
+import com.milky.mataf.core.Cloud
 import com.milky.mataf.core.Sounds
 import com.milky.mataf.core.Updater
 import com.milky.mataf.core.Updates
@@ -66,6 +68,7 @@ import com.milky.mataf.ui.components.isWide
 import com.milky.mataf.ui.screens.Changelog
 import com.milky.mataf.ui.screens.ChangelogSheet
 import com.milky.mataf.ui.screens.CloudChoiceDialog
+import com.milky.mataf.ui.screens.CloudGate
 import com.milky.mataf.ui.screens.HomeScreen
 import com.milky.mataf.ui.screens.LogsScreen
 import com.milky.mataf.ui.screens.SchedulesScreen
@@ -93,17 +96,7 @@ sealed interface Sub {
 
 @Composable
 fun App() {
-    var tab by rememberSaveable { mutableStateOf(Tab.Home) }
-    var sub by remember { mutableStateOf<Sub?>(null) }
-    val wide = isWide()
-    val holder = rememberSaveableStateHolder()
-
-    BackHandler(enabled = sub != null || tab != Tab.Home) {
-        if (sub != null) sub = null else tab = Tab.Home
-    }
-    val select: (Tab) -> Unit = { sub = null; tab = it }
-
-    // 방금 업데이트됐다면 새로워진 점을 한 번 보여 준다
+    // 방금 업데이트됐다면 새로워진 점을 한 번 보여 준다 (로그인 화면 위에도)
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var whatsNew by remember { mutableStateOf(Updates.takeWhatsNew(Repo(ctx))) }
     whatsNew?.let { (v, notes) ->
@@ -114,6 +107,23 @@ fun App() {
                 { whatsNew = null }, danger = false, cancelLabel = null)
         }
     }
+
+    // 마고에듀 통합 클라우드에 로그인해야 쓸 수 있다 (로그인한 뒤에는 인터넷이 없어도 그대로)
+    val cloud by Cloud.status.collectAsState()
+    if (cloud.loggedIn) Main() else CloudGate()
+}
+
+@Composable
+private fun Main() {
+    var tab by rememberSaveable { mutableStateOf(Tab.Home) }
+    var sub by remember { mutableStateOf<Sub?>(null) }
+    val wide = isWide()
+    val holder = rememberSaveableStateHolder()
+
+    BackHandler(enabled = sub != null || tab != Tab.Home) {
+        if (sub != null) sub = null else tab = Tab.Home
+    }
+    val select: (Tab) -> Unit = { sub = null; tab = it }
 
     // 처음 클라우드에 연결할 때 어느 시간표로 맞출지
     CloudChoiceDialog()
