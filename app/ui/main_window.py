@@ -44,6 +44,7 @@ class MainWindow(QMainWindow):
         self.player = SoundPlayer()
         self.scheduler = Scheduler(self.conn, self.player)
         self.ctx = AppContext(conn, self.player, self.scheduler, self)
+        self.ctx.session = session
         self._fullscreen = None
         self._really_quit = False
 

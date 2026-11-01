@@ -1,4 +1,5 @@
 from datetime import datetime
+from urllib.parse import urlparse
 
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QDesktopServices
@@ -67,6 +68,17 @@ class SettingsPage(QWidget):
         gen = Card(padding=24)
         gen.body.setSpacing(0)
         gen.body.addWidget(_title("일반"))
+        user = ctx.session.user if ctx.session is not None else None
+        if user:
+            # 어느 통합 클라우드 아이디로 켜졌는지 (계정은 통합 클라우드에서 바꿈)
+            username = user.get("username") or ""
+            host = urlparse(ctx.session.server or "").hostname or ""
+            gen.body.addSpacing(6)
+            gen.body.addWidget(_row("로그인한 아이디",
+                                    "아이디를 바꾸려면 통합 클라우드에서 로그아웃한 뒤 다시 로그인해 주세요.",
+                                    _value(" · ".join(x for x in (f"{user.get('name') or username} ({username})", host) if x),
+                                           C.grey900)))
+            gen.body.addWidget(hline())
         self.chk_ring = ToggleSwitch("")
         self.chk_ring.setChecked(ctx.scheduler.ring_enabled)
         self.chk_ring.toggled.connect(self.on_toggle_ring)

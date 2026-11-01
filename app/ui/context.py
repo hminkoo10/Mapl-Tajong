@@ -15,6 +15,7 @@ class AppContext(QObject):
         self.window = window
         self.toasts = None
         self.sync = None                  # CloudSync (통합 클라우드 동기화)
+        self.session = None               # 통합 클라우드에서 켜졌을 때 그 로그인 (magoedu_cloud.Session)
         scheduler.on_ring = lambda ev, forced: self.rang.emit(ev, forced)
         scheduler.on_event = lambda kind, ev: self.scheduler_event.emit(kind, ev)
 
