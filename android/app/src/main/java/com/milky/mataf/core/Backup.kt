@@ -126,6 +126,9 @@ object Backup {
                 d
             }
             val counts = replace(ctx, data)
+            // 클라우드에 연결돼 있으면 바뀐 시간표·종소리와 (지운) 건너뛰기를 올린다
+            com.milky.mataf.data.DataChanges.notify(com.milky.mataf.data.DataChanges.Kind.CONFIG)
+            com.milky.mataf.data.DataChanges.notify(com.milky.mataf.data.DataChanges.Kind.STATE)
             // 다듬기 원본은 종소리 id 로 짝을 찾으므로, 같은 id 의 다른 소리로 잘못 되돌리지 않게 비운다
             AudioEdit.originalsDir(ctx).listFiles()?.forEach { it.delete() }
             AppEvents.changed()

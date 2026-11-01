@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CloudQueue
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Pause
@@ -59,6 +60,7 @@ import com.milky.mataf.FullscreenActivity
 import com.milky.mataf.core.Alarms
 import com.milky.mataf.core.AppEvents
 import com.milky.mataf.core.BellService
+import com.milky.mataf.core.Cloud
 import com.milky.mataf.core.Scheduler
 import com.milky.mataf.core.TodayEvent
 import com.milky.mataf.data.Repo
@@ -113,6 +115,7 @@ fun HomeScreen() {
     val pauseDay = remember(version, now.toLocalDate()) { repo.isPauseDay(now.toLocalDate()) }
     val played = remember(version, minute) { repo.countPlayed(now.toLocalDate()) }
     val setName = remember(version) { repo.sets().firstOrNull { it.id == repo.activeSetId() }?.name ?: "" }
+    val ringsHere = remember(version) { Cloud.ringsHere(repo) }
     val wide = isWide()
 
     Page(16.dp) {
@@ -123,11 +126,27 @@ fun HomeScreen() {
                     style = text(15, FontWeight.SemiBold, C.grey600))
                 RollingClock("%02d:%02d:%02d".format(now.hour, now.minute, now.second), if (wide) 52 else 44)
             }
-            StatusDot(if (paused) "잠시 멈춤" else if (pauseDay) "오늘은 쉬는 날" else if (next != null) "자동 타종 중" else "대기 중",
-                if (paused || pauseDay) C.warning else if (next != null) C.success else C.grey400)
+            StatusDot(if (paused) "잠시 멈춤" else if (pauseDay) "오늘은 쉬는 날" else if (!ringsHere) "다른 기기가 울려요"
+                else if (next != null) "자동 타종 중" else "대기 중",
+                if (paused || pauseDay) C.warning else if (!ringsHere) C.grey400 else if (next != null) C.success else C.grey400)
         }
 
-        if (!Alarms.canExact(ctx)) {
+        if (!ringsHere) {
+            Card(padding = 16.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.CloudQueue, null, tint = C.accent)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("이 기기에서는 종을 울리지 않아요", style = text(14, FontWeight.SemiBold))
+                        Text(if (Cloud.isLoggedIn()) "클라우드에 연결된 다른 기기가 울려요. ‘지금 울리기’는 그 기기에 부탁해요."
+                            else "클라우드에 로그인하거나 설정에서 ‘이 기기에서 종 울리기’를 켜 주세요.",
+                            style = text(13, color = C.grey600))
+                    }
+                }
+            }
+        }
+
+        if (ringsHere && !Alarms.canExact(ctx)) {
             Card(padding = 16.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.Warning, null, tint = C.warning)
@@ -143,11 +162,18 @@ fun HomeScreen() {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 NextCard(next, now, setName, today)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ActionTile(Icons.Rounded.NotificationsActive, "다음 종 지금 울리기", "기다리지 않고 바로 울려요",
+                    ActionTile(Icons.Rounded.NotificationsActive, "다음 종 지금 울리기",
+                        if (ringsHere) "기다리지 않고 바로 울려요" else "종을 울리는 기기에 부탁해요",
                         Modifier.weight(1f), enabled = next != null) {
-                        val ev = Scheduler.ringNextNow(ctx)
-                        if (ev != null) Toasts.show("${TimeUtil.ampm(ev.runAt.toLocalTime())} ${ev.name} 종을 지금 울렸어요", "success",
-                            "되돌리기") { BellService.stop(ctx); Scheduler.undo(ctx, ev.scheduleId, ev.runAt.toLocalDate(), Scheduler.FIRED) }
+                        if (ringsHere) {
+                            val ev = Scheduler.ringNextNow(ctx)
+                            if (ev != null) Toasts.show("${TimeUtil.ampm(ev.runAt.toLocalTime())} ${ev.name} 종을 지금 울렸어요", "success",
+                                "되돌리기") { BellService.stop(ctx); Scheduler.undo(ctx, ev.scheduleId, ev.runAt.toLocalDate(), Scheduler.FIRED) }
+                        } else {
+                            val ev = Scheduler.requestNext(ctx)
+                            if (ev != null) Toasts.show("${TimeUtil.ampm(ev.runAt.toLocalTime())} ${ev.name} 종을 울려 달라고 보냈어요", "success")
+                            else Toasts.show("클라우드에 로그인해야 다른 기기에 울려 달라고 할 수 있어요", "warning")
+                        }
                     }
                     ActionTile(Icons.Rounded.SkipNext, "다음 종 건너뛰기", "이번 한 번만 울리지 않아요", Modifier.weight(1f),
                         enabled = next != null) {
@@ -167,11 +193,11 @@ fun HomeScreen() {
                         ctx.startActivity(Intent(ctx, FullscreenActivity::class.java))
                     }
                 }
-                ManualPlayCard(ringing)
+                ManualPlayCard(ringing, ringsHere)
             }
         }
         val right: @Composable () -> Unit = {
-            TodayCard(today, played, pauseDay, now) { on ->
+            TodayCard(today, played, pauseDay, now, ringsHere) { on ->
                 repo.setPauseDay(LocalDate.now(), on)
                 Alarms.reschedule(ctx)
                 Toasts.show(if (on) "오늘은 자동 타종을 하지 않아요" else "오늘 자동 타종을 다시 켰어요")
@@ -278,7 +304,7 @@ private fun ActionTile(icon: ImageVector, title: String, desc: String, modifier:
 }
 
 @Composable
-private fun ManualPlayCard(ringing: String?) {
+private fun ManualPlayCard(ringing: String?, ringsHere: Boolean) {
     val ctx = LocalContext.current
     val version by AppEvents.version.collectAsState()
     val sounds = remember(version) { Repo(ctx).sounds() }
@@ -289,7 +315,13 @@ private fun ManualPlayCard(ringing: String?) {
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Select(sounds.map { it.id to it.name }, chosen, { sel = it }, Modifier.weight(1f))
-            Btn("울리기", { chosen?.let { BellService.playSound(ctx, it) } }, style = BtnStyle.Primary, enabled = chosen != null)
+            Btn("울리기", {
+                chosen?.let { id ->
+                    if (ringsHere) BellService.playSound(ctx, id)
+                    else if (Cloud.requestRing(null, id)) Toasts.show("${sounds.firstOrNull { it.id == id }?.name ?: "종"}을(를) 울려 달라고 보냈어요", "success")
+                    else Toasts.show("클라우드에 로그인해야 다른 기기에 울려 달라고 할 수 있어요", "warning")
+                }
+            }, style = BtnStyle.Primary, enabled = chosen != null)
             Btn("정지", { BellService.stop(ctx) }, icon = Icons.Rounded.Stop, enabled = ringing != null)
         }
         if (ringing != null) {
@@ -299,7 +331,8 @@ private fun ManualPlayCard(ringing: String?) {
 }
 
 @Composable
-private fun TodayCard(events: List<TodayEvent>, played: Int, pauseDay: Boolean, now: LocalDateTime, onPauseDay: (Boolean) -> Unit) {
+private fun TodayCard(events: List<TodayEvent>, played: Int, pauseDay: Boolean, now: LocalDateTime, ringsHere: Boolean,
+                      onPauseDay: (Boolean) -> Unit) {
     val ctx = LocalContext.current
     Card {
         Text("오늘", style = text(17, FontWeight.Bold))
@@ -310,7 +343,7 @@ private fun TodayCard(events: List<TodayEvent>, played: Int, pauseDay: Boolean, 
         }
         Spacer(Modifier.height(8.dp))
         if (events.isEmpty()) Empty("오늘은 울릴 종이 없어요")
-        events.forEach { ev -> TodayRow(ev, now) { action ->
+        events.forEach { ev -> TodayRow(ev, now, ringsHere) { action ->
             if (Scheduler.undo(ctx, ev.scheduleId, ev.date, action)) Toasts.show(
                 if (action == Scheduler.SKIP) "건너뛰기를 취소했어요. 정해진 시간에 울려요" else "정해진 시간에 다시 울려요", "success")
         } }
@@ -332,12 +365,13 @@ private fun Stat(label: String, value: String, modifier: Modifier) {
 }
 
 @Composable
-private fun TodayRow(ev: TodayEvent, now: LocalDateTime, onUndo: (String) -> Unit) {
+private fun TodayRow(ev: TodayEvent, now: LocalDateTime, ringsHere: Boolean, onUndo: (String) -> Unit) {
     val nxt = ev.status == "next"
     val past = ev.status in setOf("played", "skipped", "failed", "missed", "passed")
     val undo = when (ev.status) {
         "will_skip" -> Scheduler.SKIP to "울리기"
-        "rang_early" -> Scheduler.FIRED to "제때 울리기"
+        // 미리 울림 표시는 기기마다 따로라서, 울리지 않는 기기에서 지워도 울리는 기기에는 그대로다
+        "rang_early" -> if (ringsHere) Scheduler.FIRED to "제때 울리기" else null
         else -> null
     }
     val (label, col) = STATUS[ev.status] ?: ("예정" to C.grey500)
@@ -356,7 +390,8 @@ private fun TodayRow(ev: TodayEvent, now: LocalDateTime, onUndo: (String) -> Uni
                 overflow = TextOverflow.Ellipsis)
             Row {
                 if (undo != null) Text("$label · ", style = text(12, FontWeight.SemiBold, col))
-                Text(ev.sound, style = text(12, color = C.grey500), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(if (ev.device.isNotEmpty()) "${ev.sound} · ${ev.device}" else ev.sound, style = text(12, color = C.grey500),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         if (undo != null) {

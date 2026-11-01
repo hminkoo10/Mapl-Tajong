@@ -38,6 +38,8 @@ data class LogEntry(
     val soundName: String,
     val result: String,
     val detail: String,
+    /** 다른 기기 기록이면 그 기기 이름 (이 기기 기록은 "") */
+    val device: String = "",
 )
 
 /** 일정 여러 개를 한 번에 바꿀 때의 변경 내용 (null 이면 그대로 둔다) */
@@ -54,12 +56,32 @@ data class BatchChange(
     val setId: Long? = null,
 )
 
+/**
+ * 다른 기기와 함께 쓰는 데이터(시간표·세트·종소리·지금 세트 / 멈춤·건너뛰기·오늘 쉬기 / 기록)가 바뀌었을 때 알린다.
+ * 클라우드 동기화가 듣고 잠시 모았다가 서버에 올린다. (화면 다시 그리기 신호 AppEvents 와는 따로)
+ */
+object DataChanges {
+    enum class Kind { CONFIG, STATE, LOGS }
+
+    @Volatile var listener: ((Kind) -> Unit)? = null
+
+    fun notify(kind: Kind) {
+        try {
+            listener?.invoke(kind)
+        } catch (_: Exception) {
+        }
+    }
+}
+
 val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 val STAMP: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
 /** 데이터 읽고 쓰기. 모든 함수는 짧게 끝나므로 화면 스레드에서 불러도 된다. */
 class Repo(ctx: Context) {
+    private val app: Context = ctx.applicationContext
     private val db: SQLiteDatabase = Db.get(ctx).writableDatabase
+
+    private fun changed(kind: DataChanges.Kind) = DataChanges.notify(kind)
 
     // ---------------- 설정 ----------------
     fun setting(key: String, def: String = ""): String =
@@ -67,6 +89,10 @@ class Repo(ctx: Context) {
 
     fun setSetting(key: String, value: String) {
         db.execSQL("INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)", arrayOf(key, value))
+        when (key) {
+            "active_set_id" -> changed(DataChanges.Kind.CONFIG)
+            "paused" -> changed(DataChanges.Kind.STATE)
+        }
     }
 
     // ---------------- 종소리 ----------------
@@ -81,18 +107,21 @@ class Repo(ctx: Context) {
     fun insertSound(name: String, fileName: String, volume: Double): Long =
         db.insertOrThrow("sounds", null, ContentValues().apply {
             put("name", name); put("file_name", fileName); put("volume", volume)
-        })
+        }).also { changed(DataChanges.Kind.CONFIG) }
 
     fun updateSound(id: Long, name: String, volume: Double) {
         db.update("sounds", ContentValues().apply { put("name", name); put("volume", volume) }, "id=?", arrayOf(id.toString()))
+        changed(DataChanges.Kind.CONFIG)
     }
 
     fun updateSoundFile(id: Long, fileName: String) {
         db.update("sounds", ContentValues().apply { put("file_name", fileName) }, "id=?", arrayOf(id.toString()))
+        changed(DataChanges.Kind.CONFIG)
     }
 
     fun deleteSound(id: Long) {
         db.delete("sounds", "id=?", arrayOf(id.toString()))
+        changed(DataChanges.Kind.CONFIG)
     }
 
     fun soundUsage(): Map<Long, Int> = db.rawQuery("SELECT sound_id, COUNT(*) FROM schedules GROUP BY sound_id", null).use { c ->
@@ -114,9 +143,11 @@ class Repo(ctx: Context) {
 
     fun createSet(name: String): Long =
         db.insertOrThrow("schedule_sets", null, ContentValues().apply { put("name", uniqueSetName(name)) })
+            .also { changed(DataChanges.Kind.CONFIG) }
 
     fun renameSet(id: Long, name: String) {
         db.update("schedule_sets", ContentValues().apply { put("name", uniqueSetName(name, id)) }, "id=?", arrayOf(id.toString()))
+        changed(DataChanges.Kind.CONFIG)
     }
 
     fun deleteSet(id: Long) {
@@ -128,6 +159,7 @@ class Repo(ctx: Context) {
         } finally {
             db.endTransaction()
         }
+        changed(DataChanges.Kind.CONFIG)
     }
 
     fun uniqueSetName(name: String, exceptId: Long? = null): String {
@@ -152,6 +184,7 @@ class Repo(ctx: Context) {
             return newId
         } finally {
             db.endTransaction()
+            changed(DataChanges.Kind.CONFIG)
         }
     }
 
@@ -181,7 +214,7 @@ class Repo(ctx: Context) {
             put("set_id", setId); put("name", name); put("weekday_mask", mask); put("time_hhmm", hhmm)
             put("sound_id", soundId); if (volume == null) putNull("volume_override") else put("volume_override", volume)
             put("enabled", if (enabled) 1 else 0)
-        })
+        }).also { changed(DataChanges.Kind.CONFIG) }
 
     fun updateSchedule(id: Long, name: String, mask: Int, hhmm: String, soundId: Long, volume: Double?, enabled: Boolean) {
         val old = schedule(id)
@@ -192,12 +225,14 @@ class Repo(ctx: Context) {
             put("updated_at", LocalDateTime.now().format(STAMP))
         }, "id=?", arrayOf(id.toString()))
         if (old != null && old.hhmm != hhmm) resetOneTime(id)
+        changed(DataChanges.Kind.CONFIG)
     }
 
     fun deleteSchedules(ids: Collection<Long>) {
         if (ids.isEmpty()) return
         val q = ids.joinToString(",") { "?" }
         db.delete("schedules", "id IN ($q)", ids.map { it.toString() }.toTypedArray())
+        changed(DataChanges.Kind.CONFIG)
     }
 
     fun setEnabled(ids: Collection<Long>, on: Boolean) {
@@ -205,6 +240,7 @@ class Repo(ctx: Context) {
         val q = ids.joinToString(",") { "?" }
         db.update("schedules", ContentValues().apply { put("enabled", if (on) 1 else 0) }, "id IN ($q)",
             ids.map { it.toString() }.toTypedArray())
+        changed(DataChanges.Kind.CONFIG)
     }
 
     fun duplicateSchedules(ids: Collection<Long>, shiftMinutes: Int = 0, toSet: Long? = null): List<Long> {
@@ -220,6 +256,7 @@ class Repo(ctx: Context) {
         } finally {
             db.endTransaction()
         }
+        changed(DataChanges.Kind.CONFIG)
         return out
     }
 
@@ -252,6 +289,7 @@ class Repo(ctx: Context) {
         } finally {
             db.endTransaction()
         }
+        changed(DataChanges.Kind.CONFIG)
     }
 
     // ---------------- 한 번만 적용되는 변경 (건너뛰기·미리 울림·오늘 쉼) ----------------
@@ -259,11 +297,12 @@ class Repo(ctx: Context) {
         db.insertOrThrow("overrides", null, ContentValues().apply {
             put("date_yyyymmdd", date.format(DATE)); put("schedule_id", scheduleId); put("action", action); put("note", note)
         })
+        if (action != "FIRED_ONCE") changed(DataChanges.Kind.STATE)   // 미리 울림 표시는 기기마다 따로
     }
 
     fun removeOverride(date: LocalDate, scheduleId: Long, action: String): Int =
         db.delete("overrides", "date_yyyymmdd=? AND schedule_id=? AND action=?",
-            arrayOf(date.format(DATE), scheduleId.toString(), action))
+            arrayOf(date.format(DATE), scheduleId.toString(), action)).also { if (action != "FIRED_ONCE") changed(DataChanges.Kind.STATE) }
 
     fun hasOverride(date: LocalDate, scheduleId: Long, action: String): Boolean =
         db.rawQuery("SELECT 1 FROM overrides WHERE date_yyyymmdd=? AND schedule_id=? AND action=? LIMIT 1",
@@ -287,12 +326,14 @@ class Repo(ctx: Context) {
     fun setPauseDay(date: LocalDate, on: Boolean) {
         db.delete("overrides", "date_yyyymmdd=? AND action='PAUSE_DAY'", arrayOf(date.format(DATE)))
         if (on) addOverride(date, 0, "PAUSE_DAY", "admin")
+        changed(DataChanges.Kind.STATE)
     }
 
     /** 시각을 바꾸면 오늘 걸려 있던 건너뛰기·미리 울림은 의미가 없어지므로 지운다 */
     private fun resetOneTime(scheduleId: Long) {
         db.delete("overrides", "schedule_id=? AND action IN ('SKIP_ONCE','FIRED_ONCE') AND date_yyyymmdd >= ?",
             arrayOf(scheduleId.toString(), LocalDate.now().format(DATE)))
+        changed(DataChanges.Kind.STATE)
     }
 
     // ---------------- 기록 ----------------
@@ -302,33 +343,65 @@ class Repo(ctx: Context) {
             if (scheduleId == null) putNull("schedule_id") else put("schedule_id", scheduleId)
             put("schedule_name", scheduleName); put("sound_name", soundName); put("result", result); put("detail", detail)
         })
+        changed(DataChanges.Kind.LOGS)
     }
 
+    /** 이 기기 기록과 클라우드로 받은 다른 기기 기록을 합쳐서 (최근 것부터) */
     fun logs(from: LocalDate, to: LocalDate, result: String? = null): List<LogEntry> {
-        val args = mutableListOf(from.format(DATE) + " 00:00:00", to.format(DATE) + " 23:59:59")
+        val lo = from.format(DATE) + " 00:00:00"
+        val hi = to.format(DATE) + " 23:59:59"
+        val args = mutableListOf(lo, hi)
         var sql = "SELECT id, occurred_at, schedule_id, schedule_name, sound_name, result, detail FROM logs " +
             "WHERE occurred_at BETWEEN ? AND ?"
         if (result != null) {
             sql += " AND result=?"; args += result
         }
         sql += " ORDER BY occurred_at DESC, id DESC LIMIT 2000"
-        return db.rawQuery(sql, args.toTypedArray()).use { c ->
+        val mine = db.rawQuery(sql, args.toTypedArray()).use { c ->
             buildList {
                 while (c.moveToNext()) add(LogEntry(c.getLong(0), c.getString(1), if (c.isNull(2)) null else c.getLong(2),
                     c.getString(3) ?: "", c.getString(4) ?: "", c.getString(5), c.getString(6) ?: ""))
             }
         }
+        val others = otherLogs().filter { it.at in lo..hi && (result == null || it.result == result) }
+        if (others.isEmpty()) return mine
+        return (mine + others).sortedWith(compareByDescending<LogEntry> { it.at }.thenByDescending { it.id }).take(2000)
     }
 
-    /** 오늘 일정별 마지막 결과 (PLAYED/SKIPPED/FAILED/MISSED) */
-    fun todayResults(date: LocalDate): Map<Long, String> = db.rawQuery(
-        "SELECT schedule_id, result FROM logs WHERE occurred_at LIKE ? AND schedule_id IS NOT NULL ORDER BY id",
-        arrayOf(date.format(DATE) + "%")
-    ).use { c -> buildMap { while (c.moveToNext()) put(c.getLong(0), c.getString(1)) } }
+    private fun otherLogs(): List<LogEntry> = com.milky.mataf.core.CloudLogs.others(app)
 
-    fun countPlayed(date: LocalDate): Int = db.rawQuery(
-        "SELECT COUNT(*) FROM logs WHERE occurred_at LIKE ? AND result='PLAYED'", arrayOf(date.format(DATE) + "%")
-    ).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+    /** 오늘 일정별 마지막 결과 (PLAYED/SKIPPED/FAILED/MISSED)와 그 기록을 남긴 다른 기기 이름 (이 기기면 "") */
+    fun todayResults(date: LocalDate): Map<Long, Pair<String, String>> {
+        val day = date.format(DATE)
+        val rows = db.rawQuery(
+            "SELECT schedule_id, result, occurred_at FROM logs WHERE occurred_at LIKE ? AND schedule_id IS NOT NULL ORDER BY id",
+            arrayOf("$day%")
+        ).use { c -> buildList { while (c.moveToNext()) add(Triple(c.getString(2), c.getLong(0), c.getString(1) to "")) } }
+        val others = otherLogs().filter { it.scheduleId != null && it.at.startsWith(day) }
+            .map { Triple(it.at, it.scheduleId!!, it.result to it.device) }
+        return buildMap { (rows + others).sortedBy { it.first }.forEach { put(it.second, it.third) } }
+    }
+
+    fun countPlayed(date: LocalDate): Int {
+        val day = date.format(DATE)
+        val mine = db.rawQuery(
+            "SELECT COUNT(*) FROM logs WHERE occurred_at LIKE ? AND result='PLAYED'", arrayOf("$day%")
+        ).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+        return mine + otherLogs().count { it.result == "PLAYED" && it.at.startsWith(day) }
+    }
+
+    /** 클라우드에 올리는 이 기기 기록: from 날짜부터, 오래된 것부터, 많아야 limit 줄 */
+    fun logRowsSince(from: LocalDate, limit: Int): List<Map<String, Any?>> = db.rawQuery(
+        "SELECT occurred_at, schedule_id, schedule_name, sound_name, result, detail FROM " +
+            "(SELECT * FROM logs WHERE occurred_at >= ? ORDER BY occurred_at DESC, id DESC LIMIT ?) ORDER BY occurred_at, id",
+        arrayOf(from.format(DATE) + " 00:00:00", limit.toString())
+    ).use { c ->
+        buildList {
+            while (c.moveToNext()) add(linkedMapOf("occurred_at" to c.getString(0), "schedule_id" to if (c.isNull(1)) null else c.getLong(1),
+                "schedule_name" to (c.getString(2) ?: ""), "sound_name" to (c.getString(3) ?: ""), "result" to c.getString(4),
+                "detail" to (c.getString(5) ?: "")))
+        }
+    }
 
     // ---------------- 백업용 ----------------
     fun raw(): SQLiteDatabase = db

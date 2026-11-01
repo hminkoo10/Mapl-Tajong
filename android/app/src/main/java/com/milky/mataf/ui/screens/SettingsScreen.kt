@@ -206,6 +206,7 @@ fun SettingsScreen(extra: @Composable () -> Unit = {}) {
                 else Text("허용됨", style = text(14, FontWeight.SemiBold, C.success))
             }
         }
+        CloudCard()
         Card {
             Text("전체화면 시계", style = text(17, FontWeight.Bold))
             Spacer(Modifier.height(6.dp))

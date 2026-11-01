@@ -65,6 +65,7 @@ import com.milky.mataf.ui.components.ToastHost
 import com.milky.mataf.ui.components.isWide
 import com.milky.mataf.ui.screens.Changelog
 import com.milky.mataf.ui.screens.ChangelogSheet
+import com.milky.mataf.ui.screens.CloudChoiceDialog
 import com.milky.mataf.ui.screens.HomeScreen
 import com.milky.mataf.ui.screens.LogsScreen
 import com.milky.mataf.ui.screens.SchedulesScreen
@@ -113,6 +114,9 @@ fun App() {
                 { whatsNew = null }, danger = false, cancelLabel = null)
         }
     }
+
+    // 처음 클라우드에 연결할 때 어느 시간표로 맞출지
+    CloudChoiceDialog()
 
     Box(Modifier.fillMaxSize().background(C.bg).statusBarsPadding()
         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {

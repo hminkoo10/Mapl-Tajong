@@ -1,6 +1,6 @@
 # 안드로이드 앱 진행 기록
 
-마지막 정리: 2026-11-01
+마지막 정리: 2026-11-01 (2.2.0 클라우드 동기화)
 
 데스크톱(2.1.5)과 똑같이 쓰도록 안드로이드 앱을 `android/` 폴더에 **새로** 만들고 있어요.
 예전 앱 `AndroidStudioProjects/Mataf/`는 참고만 했고 빌드에는 쓰지 않아요. 아이콘만 예전 앱 것을 그대로 써요.
@@ -20,6 +20,7 @@
 | 백업/불러오기·시간표 CSV | 완료 | 데스크톱과 서로 주고받기 확인 |
 | 앱 자동 업데이트 | 완료 | 2.1.5 → 2.1.6 앱 안에서 받아 설치까지 에뮬레이터에서 확인 |
 | 업데이트 기록 보기 | 완료 | `android/CHANGELOG.md` |
+| 마고에듀 통합 클라우드 동기화 | 완료 (2.2.0) | 로컬 서버 + 에뮬레이터로 확인. 아래 "클라우드 동기화" |
 | 예전 앱 데이터 옮기기 | 안 함(선택) | 아래 "남은 일" 4번 |
 | 실제 기기 시험 | **아직** | 에뮬레이터(Android 15, Pixel 7)에서만 확인 |
 
@@ -62,6 +63,58 @@
 - **YouTube가 플레이어를 바꿔 n 풀기가 깨지면**: yt-dlp가 요구하는 ejs 버전(`pyproject.toml`의 `yt-dlp-ejs==`)을 보고,
   그 버전의 `yt.solver.lib.min.js`·`yt.solver.core.min.js`를 GitHub 릴리스(yt-dlp/ejs)에서 받아
   yt-dlp `jsc/_builtin/vendor/_info.py`의 SHA3-512와 맞춘 뒤 `assets/ejs`에 바꿔 넣어요. TV 클라이언트 버전 값도 yt-dlp `_base.py`를 따라가요.
+
+## 클라우드 동기화 (2.2.0, 2026-11-01)
+
+형식은 저장소의 `docs/cloud-sync.md` 를 그대로 따라요. 서버는 MagoEdu `server/` (`/api/auth/login`, `/api/sync/tajong…`, `/api/sync/events`).
+
+- **로그인**: 설정 → 마고에듀 통합 클라우드. 서버 주소(기본 `https://mago.milky.kr`)·아이디·비밀번호, 그리고 "이 기기에서 종 울리기"(기본 꺼짐).
+  기기 정보 `{id, name: "제조사 모델", platform: "android", version}` 를 함께 보내요.
+  - 기기 ID: 처음 쓸 때 만든 UUID, `noBackupFilesDir/cloud_device_id` (백업되지 않음). 기록 파일 이름 `logs/<기기 ID>.json` 에도 써요.
+  - 세션 토큰: Android Keystore 의 AES-GCM 키로 암호화해서 설정 표 `cloud_token` 에 (`k1:…`). Keystore 를 못 쓰는 기기에서만 평문(`p1:…`).
+    다른 기기로 옮긴 백업에서는 풀리지 않아서 "다시 로그인해 주세요"가 떠요.
+  - 401 → 로그인만 풀리고 메시지를 보여 줘요 (맞춘 상태와 "이 기기에서 종 울리기"는 그대로, 같은 계정으로 다시 로그인하면 이어서 맞춤).
+  - 로그아웃 → 서버 세션도 지우고, 맞춘 상태·다른 기기 기록을 지우고, 이 기기에서 다시 종이 울려요(`ring_device=1`).
+- **동기화** (`core/Cloud.kt`): 작업자 코루틴 하나 + Mutex 로 한 번에 하나씩. 상태는 `filesDir/cloud/sync.json`
+  (seq, 서버 목록, 파일마다 마지막으로 맞춘 rev/sha, 마지막으로 맞춘 내용의 해시, 울림 요청, 처리한 요청 id, 종소리 sha 캐시).
+  - 받기: `?since=seq` → 종소리 파일 먼저 → `config.json` 적용 → 지운 종소리 → `state.json` → 다른 기기 기록(`filesDir/cloud/logs/`).
+  - 올리기: 데이터가 바뀌면(`data/Repo.kt` 의 `DataChanges`) 시간표·오늘 설정은 1초, 기록은 5초 모았다가, **meta 를 뺀 내용이 마지막으로 맞춘 것과 다를 때만**.
+    적용한 직후의 내용을 "마지막으로 맞춘 것"으로 기억해서 주고받기가 되풀이되지 않아요.
+  - 둘 다 바뀌면 서버 것을 쓰고 "다른 기기에서 먼저 바뀌어서 그 내용으로 맞췄어요". 내 기록 파일·이 기기 시간표가 쓰는 종소리 파일은 서버 것 위에 다시 올려요.
+    state.json 이 부딪히면 이 기기가 넣은 울림 요청만 다시 얹어요.
+  - 처음 연결: 클라우드에 시간표가 없으면 올리고, 이 기기가 처음 설치한 그대로(일정 없음·세트 하나·bell1~8 만)거나 같으면 클라우드 것을 쓰고,
+    둘 다 있고 다르면 고르는 창(`ui/screens/CloudCard.kt`). "클라우드 시간표 쓰기"는 먼저 `filesDir/backups/클라우드_연결_전_마고타종_백업_….zip` 을 만들어요.
+- **실시간** (`core/CloudEvents.kt`): `GET /api/sync/events?apps=tajong`, 끊기면 1초 → 두 배 → 많아야 30초. 붙을 때마다 한 번 받아요.
+  읽기 제한 70초(서버 ping 25초) — 조용히 끊긴 연결을 알아채려고요. 이 주소가 없는 서버면 다시 붙으려 할 때마다 받아서 그만큼 자주 확인해요.
+  - 앱이 보이는 동안 연결, 안 보이면 10초 뒤 끊어요.
+  - 로그인했고 이 기기가 종을 울리면 `CloudService`(앞 서비스, 종류 `specialUse`, 알림 "클라우드와 연결돼 있어요")가 앱을 닫아도 연결을 유지해요.
+    앱 시작·화면 열기·부팅/앱 업데이트(`BootReceiver`)·로그인·설정 바꿀 때 켜고 끄며, 시스템이 멈추면 다시 켜져요(START_STICKY).
+- **이 기기에서 종 울리기** (`ring_device`, 기기마다): 끄면 알람을 걸지 않고, 정해진 종도 울리거나 기록하지 않고, 울림 요청도 처리하지 않아요.
+  홈의 "다음 종 지금 울리기"·"울리기"는 `state.json` 의 `ring_requests` 에 넣어요(미리 듣기는 그대로). 홈에 "이 기기에서는 종을 울리지 않아요" 카드.
+  켜져 있으면 처음 보는 요청 중 지금 ±2분 안인 것만 한 번 울리고(시간표 종이면 그 일정의 다음 날짜에 FIRED_ONCE), 기록 설명은 `forced · <요청한 기기>`.
+  뒤에서 울림 서비스를 바로 못 켜면 정확한 알람으로 곧바로 깨워서 울려요.
+- 디버그 빌드만 `10.0.2.2`·`localhost`·`127.0.0.1` 에 http 로 붙을 수 있어요(`app/src/debug/`). 배포 빌드는 https 만.
+
+### 로컬 서버로 시험하기
+1. `node --disable-warning=ExperimentalWarning MagoEdu/server/src/index.js` (환경 변수 `PORT=8472 HOST=0.0.0.0 DATA_DIR=<임시 폴더> ADMIN_USERNAME=admin ADMIN_PASSWORD=<시험용 값>`).
+2. 에뮬레이터에 깔린 배포판(`com.milky.mataf`)을 지우지 않으려면 디버그 빌드의 패키지 이름만 바꿔서 나란히 깔아요:
+   Gradle init 스크립트로 `buildTypes.debug.applicationIdSuffix = ".cloudtest"` (저장소는 그대로).
+3. 앱 설정에서 서버 `http://10.0.2.2:8472`, `admin` 으로 로그인. 다른 기기(PC) 쪽은 같은 계정으로 다른 기기 ID 로 로그인해서 API 를 직접 불러 흉내 내요.
+
+### 2026-11-01 에 에뮬레이터에서 확인한 것 (로컬 서버, 실시간 알림 있음)
+- 클라우드가 비었을 때 로그인 → 종소리 8개, config/state/기록 올림. 앱에서 일정 추가 → 1초 뒤 config.json 올림
+- PC가 일정 이름·시각을 바꿈 → 바로 앱에 적용, 앱은 다시 올리지 않음(주고받기 없음)
+- PC가 종소리 추가(파일 → config) → 파일을 받고 목록에 보임. PC가 종소리 삭제 → 이 기기 파일도 지움. 앱에서 종소리 삭제 → config 올린 뒤 서버 파일 지움
+- PC의 잠시 멈춤·다음 날 건너뛰기 → 앱에 적용. 앱에서 멈춤 풀기 → state.json 올림
+- PC의 울림 요청(시간표 종) → 이 기기에서 울림, 다음 날짜에 미리 울림 표시, 기록 `forced · 교무실 PC(시험)` 올림. 같은 요청은 다시 울리지 않음
+- 앱을 닫은 채(홈 화면) PC의 울림 요청(종소리) → `CloudService` 가 연결을 유지해서 바로 울림
+- "이 기기에서 종 울리기" 끔 → 알람 없음, 서비스 꺼짐, 홈 카드, "지금 울리기"·"울리기" → ring_requests 에 들어감. 앱을 닫으면 10초 뒤 연결 끊음
+- PC 기록 파일 → 기록 화면·홈 오늘 결과에 "교무실 PC(시험)"와 함께 보임
+- 인터넷을 끊고 앱에서 시각 바꿈 + PC가 같은 일정을 바꿈 → 다시 연결되면 서버 것으로 맞추고 "다른 기기에서 먼저 바뀌어서…" 알림
+- 로그아웃 → 다시 로그인(이 기기 일정 추가) → 고르는 창. "클라우드 시간표 쓰기"(백업 zip 생김) / "이 기기 시간표로 바꾸기"(클라우드 config 바뀜) 둘 다
+- 서버에서 이 기기 세션을 끊음 → "지금 동기화" 때 로그인이 풀리고 "로그인이 끝났어요" 표시. 같은 계정으로 다시 로그인하면 고르는 창 없이 이어짐
+- 앱 업데이트(설치 -r, 앱은 열지 않음) 뒤 `BootReceiver` 가 `CloudService` 를 켜서 연결
+- 확인 못 한 것: 실제 기기 재부팅 뒤 자동 연결, 오래 켜 둔 상태(도즈)에서 연결 유지, 실제 서버(https), PC 데스크톱 앱과 직접 주고받기
 
 ## 로컬에서 빌드하기
 
@@ -112,15 +165,23 @@
 | `core/AudioEdit.kt` | MediaCodec으로 풀어서 파형 만들기, 자르기·페이드·음량·크기 맞춤 → WAV 저장, 원본 보관 |
 | `core/Weather.kt` | MET Norway 예보(Expires/Last-Modified, `weather.json` 보관), Nominatim 지역 검색(1초 간격, 도로명 structured 먼저) |
 | `core/Backup.kt` | 데스크톱 backup.py 그대로: zip(`manifest.json`+`data.json`+`sounds/`), 불러오기, 시간표 CSV |
+| `core/Cloud.kt` | 통합 클라우드: 로그인·토큰(Keystore), 동기화 작업자(받기·올리기·부딪힘·처음 연결), 울림 요청, 다른 기기 기록(`CloudLogs`) |
+| `core/CloudModel.kt` | 동기화 파일 형식(config/state/logs)과 판단 규칙 — 안드로이드 없이 JVM 시험(`app/src/test`) |
+| `core/CloudApi.kt` | 서버 API (로그인·로그아웃·목록·받기·올리기·지우기, 409/401 처리) |
+| `core/CloudEvents.kt` | 실시간 알림(SSE) 연결과 다시 붙기, `CloudService`(앱을 닫아도 연결 유지하는 앞 서비스) |
+| `core/Json.kt` | 동기화 파일용 작은 JSON 읽기/쓰기와 내용 비교용 정규화 |
 | `core/Updater.kt` | `Updater`: 릴리스 확인·받기·SHA-256·PackageInstaller 설치, `Updates`: 상태 흐름(데스크톱 update_manager.py), `InstallReceiver` |
 | `ui/App.kt` | 탭/왼쪽 메뉴, 찾기·다듬기 화면 열기, 알림(토스트), 업데이트 직후 '새로워진 점' |
 | `ui/theme/Theme.kt` | 데스크톱과 같은 색, Pretendard 글꼴 |
 | `ui/components/` | 버튼·카드·스위치·시각 고르기·시트·확인 창·썸네일·날씨 그림(`WeatherIcon.kt`) 등 공통 부품 |
-| `ui/screens/` | 홈, 시간표, 종소리, 기록, 설정, 찾기, 다듬기, 지역 고르기(`PlaceSheet`), 업데이트 기록(`ChangelogSheet`), 구글 로그인(`GoogleLoginScreen`) |
+| `ui/screens/` | 홈, 시간표, 종소리, 기록, 설정, 찾기, 다듬기, 지역 고르기(`PlaceSheet`), 업데이트 기록(`ChangelogSheet`), 구글 로그인(`GoogleLoginScreen`), 클라우드 카드·로그인·처음 연결 고르기(`CloudCard`) |
 
 `android/CHANGELOG.md`는 빌드할 때 `copyChangelog` 작업이 앱 assets로 넣어요 (`app/build.gradle.kts`).
 
 ## 남은 일 (하면 좋은 순서)
+
+0. **클라우드**: 실제 기기에서 재부팅 뒤·하룻밤 켜 둔 뒤에도 울림 요청을 받는지, 데스크톱(런처)과 실제로 주고받기.
+   "클라우드 시간표 쓰기" 전에 만든 백업(`filesDir/backups`)을 앱에서 불러오는 화면은 아직 없어요.
 
 1. **막히지 않은 네트워크에서 로그인 없이 YouTube 받기 확인** — 휴대폰 데이터 등. NewPipeExtractor dev 커밋(visionOS)이 실제로 되는지.
 2. **실제 기기 시험** — 아래 "기기에서 꼭 확인할 것".

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 시험용(디버그) 빌드만: 에뮬레이터에서 이 PC의 로컬 서버(http://10.0.2.2)에 붙을 수 있게 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:networkSecurityConfig="@xml/network_security_config" />
+</manifest>

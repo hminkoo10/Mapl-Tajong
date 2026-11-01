@@ -59,6 +59,8 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -245,6 +247,7 @@ fun Field(
     onPage: Boolean = false,
     numeric: Boolean = false,
     onDone: (() -> Unit)? = null,
+    password: Boolean = false,
 ) {
     Row(
         modifier
@@ -263,14 +266,16 @@ fun Field(
             BasicTextField(
                 value, { onChange(it.replace("\n", "")) }, singleLine = true, textStyle = text(15),
                 cursorBrush = SolidColor(C.accent),
+                visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
                 modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { e ->
                     val enter = e.key == Key.Enter || e.key == Key.NumPadEnter
                     if (enter && e.type == KeyEventType.KeyDown) onDone?.invoke()
                     enter && onDone != null
                 },
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Text,
-                    imeAction = if (onDone != null) ImeAction.Search else ImeAction.Done,
+                    keyboardType = if (password) KeyboardType.Password else if (numeric) KeyboardType.Number else KeyboardType.Text,
+                    imeAction = if (onDone != null && !password) ImeAction.Search else ImeAction.Done,
+                    autoCorrectEnabled = !password,
                 ),
                 keyboardActions = KeyboardActions(onSearch = { onDone?.invoke() }, onDone = { onDone?.invoke() }),
             )

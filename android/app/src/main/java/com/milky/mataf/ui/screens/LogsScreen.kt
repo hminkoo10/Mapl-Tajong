@@ -45,6 +45,13 @@ import java.time.LocalDate
 
 val RESULT_LABELS = mapOf("PLAYED" to "울림", "SKIPPED" to "건너뜀", "FAILED" to "실패", "MISSED" to "놓침")
 
+/** 기록 설명: 'forced' = 미리 울림, 'forced · 원장님 폰' = 다른 기기의 요청으로 울림 */
+fun detailText(d: String): String = when {
+    d == "forced" -> "미리 울림"
+    d.startsWith("forced · ") -> "${d.removePrefix("forced · ")} 요청"
+    else -> d
+}
+
 @Composable
 fun LogsScreen() {
     val ctx = LocalContext.current
@@ -59,10 +66,10 @@ fun LogsScreen() {
         if (uri == null) return@rememberLauncherForActivityResult
         try {
             ctx.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { w ->
-                w.write("﻿날짜,시각,일정,종소리,결과,메모\n")
+                w.write("﻿날짜,시각,일정,종소리,결과,메모,기기\n")
                 rows.forEach { r ->
                     val (d, t) = r.at.split(" ").let { it[0] to it.getOrElse(1) { "" } }
-                    w.write(listOf(d, t, r.scheduleName, r.soundName, RESULT_LABELS[r.result] ?: r.result, r.detail)
+                    w.write(listOf(d, t, r.scheduleName, r.soundName, RESULT_LABELS[r.result] ?: r.result, r.detail, r.device.ifEmpty { "이 기기" })
                         .joinToString(",") { "\"" + it.replace("\"", "\"\"") + "\"" } + "\n")
                 }
             }
@@ -81,6 +88,7 @@ fun LogsScreen() {
             Btn("엑셀로", { exporter.launch("타종기록_${today.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)}.csv") },
                 style = BtnStyle.White, icon = Icons.Rounded.FileDownload, enabled = rows.isNotEmpty())
         }
+        val merged = rows.any { it.device.isNotEmpty() }
         Card(padding = 8.dp) {
             if (rows.isEmpty()) Empty("기록이 없어요")
             var lastDate = ""
@@ -96,8 +104,9 @@ fun LogsScreen() {
                         modifier = Modifier.width(84.dp))
                     Column(Modifier.weight(1f)) {
                         Text(r.scheduleName.ifEmpty { "직접 울림" }, style = text(15, FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(r.soundName + if (r.detail.isNotEmpty() && r.detail != "forced") " · ${r.detail}" else if (r.detail == "forced") " · 미리 울림" else "",
-                            style = text(12, color = C.grey500), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val sub = listOf(r.soundName, detailText(r.detail), if (merged) r.device.ifEmpty { "이 기기" } else "")
+                            .filter { it.isNotEmpty() }.joinToString(" · ")
+                        Text(sub, style = text(12, color = C.grey500), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     val (fg, bg) = when (r.result) {
                         "PLAYED" -> C.success to C.successSoft

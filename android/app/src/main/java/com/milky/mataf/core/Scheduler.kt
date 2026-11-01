@@ -26,6 +26,8 @@ data class TodayEvent(
     val name: String,
     val sound: String,
     val status: String,
+    /** 결과를 남긴 다른 기기 이름 (이 기기면 "") */
+    val device: String = "",
 )
 
 /** 종 시간 계산 (데스크톱 app/core/scheduler.py 와 같은 규칙) */
@@ -79,7 +81,7 @@ object Scheduler {
                 val at = TimeUtil.at(today, s.hhmm)
                 val acts = ov[today.format(DATE) to s.id] ?: emptySet()
                 val status = if (!at.isAfter(now)) {
-                    when (results[s.id]) {
+                    when (results[s.id]?.first) {
                         "PLAYED" -> "played"
                         "SKIPPED" -> "skipped"
                         "FAILED" -> "failed"
@@ -93,7 +95,8 @@ object Scheduler {
                     nxt != null && nxt.scheduleId == s.id && nxt.runAt == at -> "next"
                     else -> "upcoming"
                 }
-                TodayEvent(s.id, today, s.hhmm, at, s.name, s.soundName, status)
+                TodayEvent(s.id, today, s.hhmm, at, s.name, s.soundName, status,
+                    if (!at.isAfter(now)) results[s.id]?.second.orEmpty() else "")
             }
             .sortedBy { it.runAt }
     }
@@ -116,6 +119,25 @@ object Scheduler {
         Alarms.reschedule(ctx)
         return ev
     }
+
+    /**
+     * 종을 울리지 않는 기기의 '다음 종 지금 울리기': 종을 울리는 기기에 요청을 보내고,
+     * 이 기기 화면에서도 다음 종으로 넘어가게 미리 울림으로 표시한다. 클라우드에 로그인하지 않았으면 null.
+     */
+    fun requestNext(ctx: Context): NextEvent? {
+        val repo = Repo(ctx)
+        val ev = next(repo) ?: return null
+        if (!Cloud.requestRing(ev.scheduleId, null)) return null
+        repo.addOverride(ev.runAt.toLocalDate(), ev.scheduleId, FIRED, "forced")
+        Alarms.reschedule(ctx)
+        return ev
+    }
+
+    /** 그 일정이 다음에 울릴 날짜 (쉬는 날·건너뛰기·이미 울림은 넘긴다) */
+    fun nextDateOf(repo: Repo, s: com.milky.mataf.data.Schedule, now: LocalDateTime = LocalDateTime.now()): LocalDate? =
+        CloudModel.nextOccurrence(s.mask, s.hhmm, now) { day ->
+            repo.isPauseDay(day) || repo.hasOverride(day, s.id, SKIP) || repo.hasOverride(day, s.id, FIRED)
+        }
 
     /** 건너뛰기·미리 울림 되돌리기 */
     fun undo(ctx: Context, scheduleId: Long, date: LocalDate, action: String): Boolean {

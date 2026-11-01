@@ -55,7 +55,8 @@ object Alarms {
     fun reschedule(ctx: Context) {
         val am = ctx.getSystemService(AlarmManager::class.java)
         val repo = Repo(ctx)
-        val ev = if (Scheduler.isPaused(repo)) null else Scheduler.next(repo)
+        // 이 기기에서 종을 울리지 않게 해 두었으면 아무것도 걸지 않는다
+        val ev = if (Scheduler.isPaused(repo) || !Cloud.ringsHere(repo)) null else Scheduler.next(repo)
         if (ev == null) {
             am.cancel(ringIntent(ctx))
             AppEvents.changed()
@@ -80,15 +81,20 @@ object Alarms {
 /** 알람이 울리면 종을 울리는 서비스를 깨운다. */
 class RingReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
+        if (intent.action == BellService.ACTION_REMOTE) {
+            BellService.startFrom(ctx, intent)
+            return
+        }
         val id = intent.getLongExtra(Alarms.EXTRA_ID, -1)
         val at = intent.getLongExtra(Alarms.EXTRA_AT, 0)
         if (id >= 0) BellService.ringScheduled(ctx, id, at) else Alarms.reschedule(ctx)
     }
 }
 
-/** 부팅·앱 업데이트·시간 변경 뒤에 다음 종을 다시 건다. */
+/** 부팅·앱 업데이트·시간 변경 뒤에 다음 종을 다시 걸고, 필요하면 클라우드 연결 서비스를 켠다. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         Alarms.reschedule(ctx)
+        CloudService.sync(ctx)
     }
 }

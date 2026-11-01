@@ -1,5 +1,6 @@
 package com.milky.mataf.core
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -36,6 +37,10 @@ class BellService : Service() {
         private const val E_ID = "id"
         private const val E_AT = "at"
         private const val E_VOL = "vol"
+        private const val E_DETAIL = "detail"
+        /** 다른 기기의 요청으로 울릴 때 바로 서비스를 시작할 수 없으면 정확한 알람으로 곧바로 깨운다 */
+        const val ACTION_REMOTE = "com.milky.mataf.RING_REMOTE"
+        private const val REQ_REMOTE = 7003
         /** 늦게 깨어나도 이 시간 안이면 울린다 (그보다 늦으면 '놓침'으로 기록) */
         private const val LATE_LIMIT_SEC = 120L
 
@@ -57,6 +62,38 @@ class BellService : Service() {
         fun ring(ctx: Context, scheduleId: Long, forced: Boolean) =
             start(ctx, Intent(ctx, BellService::class.java).putExtra(KIND, if (forced) K_FORCED else K_SCHEDULED)
                 .putExtra(E_ID, scheduleId).putExtra(E_AT, System.currentTimeMillis()))
+
+        /**
+         * 다른 기기가 울려 달라고 한 종 (state.json 의 ring_requests). 시간표 종이면 scheduleId, 아니면 soundId.
+         * 기록 설명은 detail ("forced · <요청한 기기>").
+         */
+        fun ringRemote(ctx: Context, scheduleId: Long?, soundId: Long?, detail: String) {
+            val i = remoteIntent(ctx, scheduleId, soundId, detail)
+            try {
+                ContextCompat.startForegroundService(ctx, i)
+            } catch (e: Exception) {
+                // 뒤에서는 앞 서비스를 바로 시작하지 못할 수 있다 → 정확한 알람으로 곧바로 깨운다
+                val pi = PendingIntent.getBroadcast(ctx, REQ_REMOTE, Intent(ctx, RingReceiver::class.java).setAction(ACTION_REMOTE)
+                    .putExtras(i), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                val am = ctx.getSystemService(AlarmManager::class.java)
+                val at = System.currentTimeMillis() + 300
+                try {
+                    if (Alarms.canExact(ctx)) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+                    else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+                } catch (_: Exception) {
+                    am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+                }
+            }
+        }
+
+        private fun remoteIntent(ctx: Context, scheduleId: Long?, soundId: Long?, detail: String): Intent =
+            if (scheduleId != null) Intent(ctx, BellService::class.java).putExtra(KIND, K_FORCED).putExtra(E_ID, scheduleId)
+                .putExtra(E_AT, System.currentTimeMillis()).putExtra(E_DETAIL, detail)
+            else Intent(ctx, BellService::class.java).putExtra(KIND, K_SOUND).putExtra(E_ID, soundId ?: -1L)
+                .putExtra(E_VOL, -1.0).putExtra(E_DETAIL, detail)
+
+        /** 알람으로 깨어난 뒤 (RingReceiver) */
+        fun startFrom(ctx: Context, extras: Intent) = start(ctx, Intent(ctx, BellService::class.java).putExtras(extras))
 
         /** 홈 화면의 '종소리 바로 울리기' */
         fun playSound(ctx: Context, soundId: Long, volume: Double? = null) =
@@ -81,8 +118,8 @@ class BellService : Service() {
         try {
             when (kind) {
                 K_SCHEDULED -> handleScheduled(id, intent?.getLongExtra(E_AT, 0) ?: 0)
-                K_FORCED -> handleForced(id)
-                K_SOUND -> handleSound(id, intent?.getDoubleExtra(E_VOL, -1.0) ?: -1.0)
+                K_FORCED -> handleForced(id, intent?.getStringExtra(E_DETAIL))
+                K_SOUND -> handleSound(id, intent?.getDoubleExtra(E_VOL, -1.0) ?: -1.0, intent?.getStringExtra(E_DETAIL))
                 else -> finish()
             }
         } catch (e: Exception) {
@@ -94,7 +131,8 @@ class BellService : Service() {
     private fun handleScheduled(id: Long, atMillis: Long) {
         val repo = Repo(this)
         val s = repo.schedule(id)
-        if (s == null) {
+        // 이 기기에서 종을 울리지 않게 해 두었으면 (클라우드의 다른 기기가 울림) 울리지도 기록하지도 않는다
+        if (s == null || !Cloud.ringsHere(repo)) {
             finish(); Alarms.reschedule(this); return
         }
         val runAt = LocalDateTime.ofInstant(Instant.ofEpochMilli(if (atMillis > 0) atMillis else System.currentTimeMillis()),
@@ -120,17 +158,21 @@ class BellService : Service() {
         Alarms.reschedule(this)
     }
 
-    private fun handleForced(id: Long) {
+    private fun handleForced(id: Long, detail: String?) {
         val repo = Repo(this)
         val s = repo.schedule(id) ?: return finish()
         play(Sounds.file(this, s.soundFile).absolutePath, s.volume, s.name) { err ->
-            repo.log(id, s.name, s.soundName, if (err == null) "PLAYED" else "FAILED", if (err == null) "forced" else err)
+            repo.log(id, s.name, s.soundName, if (err == null) "PLAYED" else "FAILED", if (err == null) detail ?: "forced" else err)
         }
     }
 
-    private fun handleSound(soundId: Long, volume: Double) {
-        val s = Repo(this).sound(soundId) ?: return finish()
-        play(Sounds.file(this, s.fileName).absolutePath, if (volume >= 0) volume else s.volume, s.name) {}
+    /** logDetail 이 있으면(다른 기기의 요청) 기록도 남긴다 */
+    private fun handleSound(soundId: Long, volume: Double, logDetail: String?) {
+        val repo = Repo(this)
+        val s = repo.sound(soundId) ?: return finish()
+        play(Sounds.file(this, s.fileName).absolutePath, if (volume >= 0) volume else s.volume, s.name) { err ->
+            if (logDetail != null) repo.log(null, "", s.name, if (err == null) "PLAYED" else "FAILED", if (err == null) logDetail else err)
+        }
     }
 
     /** onStarted(null) = 재생 시작, onStarted("오류") = 실패 */
