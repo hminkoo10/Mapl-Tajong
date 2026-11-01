@@ -417,7 +417,7 @@ object Updates {
             return
         }
         safeJob?.cancel()
-        Toasts.show("${info.version} 버전으로 업데이트할게요. 잠깐 꺼졌다 다시 켜져요.")
+        Toasts.show("${info.version} 버전으로 업데이트할게요. 앱이 닫혀도 종은 그대로 울려요.")
         scope.launch {
             delay(5000)
             doInstall(ctx)
