@@ -68,6 +68,22 @@ android {
     }
 }
 
+// 업데이트 기록: android/CHANGELOG.md 를 앱(assets)에 함께 넣는다
+abstract class CopyChangelog : DefaultTask() {
+    @get:InputFile abstract val source: RegularFileProperty
+    @get:OutputDirectory abstract val outDir: DirectoryProperty
+
+    @TaskAction
+    fun run() {
+        source.get().asFile.copyTo(outDir.get().file("CHANGELOG.md").asFile, overwrite = true)
+    }
+}
+
+val copyChangelog = tasks.register<CopyChangelog>("copyChangelog") { source.set(rootProject.file("CHANGELOG.md")) }
+androidComponents {
+    onVariants { it.sources.assets?.addGeneratedSourceDirectory(copyChangelog, CopyChangelog::outDir) }
+}
+
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.3")
 

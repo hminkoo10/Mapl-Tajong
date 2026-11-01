@@ -53,12 +53,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.milky.mataf.R
 import com.milky.mataf.core.Sounds
+import com.milky.mataf.core.Updater
+import com.milky.mataf.core.Updates
+import com.milky.mataf.data.Repo
 import com.milky.mataf.data.Sound
 import com.milky.mataf.ui.screens.SearchScreen
 import com.milky.mataf.ui.screens.SoundEditorScreen
 import java.io.File
+import com.milky.mataf.ui.components.ConfirmDialog
 import com.milky.mataf.ui.components.ToastHost
 import com.milky.mataf.ui.components.isWide
+import com.milky.mataf.ui.screens.Changelog
+import com.milky.mataf.ui.screens.ChangelogSheet
 import com.milky.mataf.ui.screens.HomeScreen
 import com.milky.mataf.ui.screens.LogsScreen
 import com.milky.mataf.ui.screens.SchedulesScreen
@@ -95,6 +101,18 @@ fun App() {
         if (sub != null) sub = null else tab = Tab.Home
     }
     val select: (Tab) -> Unit = { sub = null; tab = it }
+
+    // 방금 업데이트됐다면 새로워진 점을 한 번 보여 준다
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var whatsNew by remember { mutableStateOf(Updates.takeWhatsNew(Repo(ctx))) }
+    whatsNew?.let { (v, notes) ->
+        if (Changelog.notesFor(ctx, v).isNotEmpty()) {
+            ChangelogSheet(onDismiss = { whatsNew = null }, onlyVersion = v, title = "$v 버전으로 업데이트했어요")
+        } else {
+            ConfirmDialog("$v 버전으로 업데이트했어요", Updater.notesToText(notes).ifEmpty { "더 안정적으로 다듬었어요." }, "확인", {},
+                { whatsNew = null }, danger = false, cancelLabel = null)
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(C.bg).statusBarsPadding()
         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {

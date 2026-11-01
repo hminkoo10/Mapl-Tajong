@@ -51,6 +51,11 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -254,9 +259,15 @@ fun Field(
         }
         Box(Modifier.weight(1f)) {
             if (value.isEmpty()) Text(placeholder, style = text(15, color = C.grey400), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // 물리 키보드의 Enter 도 줄바꿈이 아니라 검색/완료로 (데스크톱 2.1.5 와 같게)
             BasicTextField(
-                value, onChange, singleLine = true, textStyle = text(15),
-                cursorBrush = SolidColor(C.accent), modifier = Modifier.fillMaxWidth(),
+                value, { onChange(it.replace("\n", "")) }, singleLine = true, textStyle = text(15),
+                cursorBrush = SolidColor(C.accent),
+                modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { e ->
+                    val enter = e.key == Key.Enter || e.key == Key.NumPadEnter
+                    if (enter && e.type == KeyEventType.KeyDown) onDone?.invoke()
+                    enter && onDone != null
+                },
                 keyboardOptions = KeyboardOptions(
                     keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Text,
                     imeAction = if (onDone != null) ImeAction.Search else ImeAction.Done,

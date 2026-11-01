@@ -1,19 +1,23 @@
 # Android 앱 빌드·배포
-#   - claude/** 브랜치에 android/ 가 바뀌면: APK 를 빌드해 Actions 결과물로 올린다 (배포는 안 함)
-#   - release/android-vX.Y.Z 브랜치를 만들면: 빌드 → GitHub Release(태그 android-vX.Y.Z)에 APK 를 올린다
+#   - dev/** 브랜치에 android/ 가 바뀌면: APK 를 빌드해 Actions 결과물로 올린다 (배포는 안 함)
+#   - main 에 android/ 가 바뀌면: android/version.properties 의 버전이 아직 배포되지 않았을 때만
+#     빌드 → GitHub Release(태그 android-vX.Y.Z)에 APK 를 올린다. 이미 있는 버전이면 빌드만 한다.
+#   - release/android-vX.Y.Z 브랜치를 만들거나 android-vX.Y.Z 태그를 올려도 배포한다
 # 서명 키는 저장소 비밀값 ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD 로 넣는다.
-# 비밀값이 없으면 시험용(디버그) 키로 서명한다.
+# 비밀값이 없으면 시험용(디버그) 키로 서명하고, 배포는 하지 않는다 (키가 바뀌면 자동 업데이트가 안 되니까).
 name: Android
 
 on:
   push:
-    branches: ["claude/**", "release/android-v*"]
+    branches: ["main", "dev/**", "release/android-v*"]
+    tags: ["android-v*"]
     paths: ["android/**", ".github/workflows/android.yml"]
   workflow_dispatch:
 
 concurrency:
   group: android-${{ github.ref }}
-  cancel-in-progress: true
+  # 배포하는 실행이 중간에 끊기지 않게, 취소는 dev 브랜치에서만
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/heads/dev/') }}
 
 permissions:
   contents: write
@@ -36,18 +40,27 @@ jobs:
 
       - name: Read version
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           name=$(grep '^versionName=' version.properties | cut -d= -f2)
           code=$(grep '^versionCode=' version.properties | cut -d= -f2)
           publish=0
           case "$GITHUB_REF" in
-            refs/heads/release/*)
+            refs/heads/release/*|refs/tags/*)
               want="${GITHUB_REF#refs/heads/release/}"
+              want="${want#refs/tags/}"
               if [ "$want" != "android-v$name" ]; then
                 echo "$want 와 version.properties 의 버전($name)이 달라요"; exit 1
               fi
               publish=1 ;;
+            refs/heads/main)
+              if gh release view "android-v$name" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+                echo "android-v$name 은 이미 배포됐어요. 빌드만 해요."
+              else
+                publish=1
+              fi ;;
           esac
           echo "VERSION=$name" >> "$GITHUB_ENV"
           echo "VERSION_CODE=$code" >> "$GITHUB_ENV"
@@ -62,6 +75,8 @@ jobs:
             echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
             echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
             echo "서명 키: 저장소 비밀값"
+          elif [ "$PUBLISH" = "1" ]; then
+            echo "배포용 서명 키(저장소 비밀값)가 없어서 배포하지 않아요"; exit 1
           else
             echo "서명 키: 시험용(디버그) 키"
           fi

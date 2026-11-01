@@ -3,7 +3,7 @@ name: Clean up branches
 
 on:
   push:
-    branches: ["claude/**"]
+    branches: ["dev/**"]
     paths: [".github/workflows/cleanup-branches.yml", "tools/cleanup_release_branches.sh"]
   workflow_dispatch:
 

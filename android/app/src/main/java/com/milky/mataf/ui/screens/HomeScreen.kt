@@ -236,14 +236,15 @@ private fun NextCard(next: com.milky.mataf.core.NextEvent?, now: LocalDateTime, 
 }
 
 @Composable
-fun CountdownRing(progress: Float, center: String, sub: String, urgent: Boolean, size: Int = 132, dark: Boolean = false) {
+fun CountdownRing(progress: Float, center: String, sub: String, urgent: Boolean, size: Int = 132, dark: Boolean = false,
+                  track: Color? = null) {
     val p by animateFloatAsState(progress.coerceIn(0f, 1f), tween(700), label = "ring")
     Box(Modifier.size(size.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.size(size.dp)) {
             val th = this.size.minDimension * 0.075f
             val inset = th / 2 + 4
             val sz = Size(this.size.width - inset * 2, this.size.height - inset * 2)
-            drawArc(if (dark) Color.White.copy(alpha = 0.12f) else C.grey100, 0f, 360f, false, Offset(inset, inset), sz,
+            drawArc(track ?: if (dark) Color.White.copy(alpha = 0.12f) else C.grey100, 0f, 360f, false, Offset(inset, inset), sz,
                 style = Stroke(th, cap = StrokeCap.Round))
             if (p > 0.003f) {
                 drawArc(Brush.sweepGradient(listOf(C.g0, C.g2, C.g0)), -90f, 360f * p, false, Offset(inset, inset), sz,
