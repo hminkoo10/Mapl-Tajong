@@ -13,13 +13,14 @@
 | 종 울리기 핵심 | 완료 | 정확 알람, 부팅 뒤 다시 걸기, 앞에서 도는 서비스 |
 | 홈 / 시간표 / 종소리 / 기록 / 설정 화면 | 완료 | 휴대폰은 아래 탭, 태블릿(가로 840dp 이상)은 왼쪽 메뉴 |
 | 전체화면 시계 | 완료 | 어둡게/밝게, 다음 종 원, 남은 종 카드, 날씨 |
-| YouTube·SoundCloud 찾아서 받기 | 완료 | 로그인 없음 (NewPipeExtractor) |
+| YouTube·SoundCloud 찾아서 받기 | 완료 | YouTube가 막는 네트워크에서는 구글 로그인이 필요해요. 아래 "YouTube 봇 확인과 구글 로그인" |
+| YouTube 구글 로그인 | 완료 (2.1.6) | 에뮬레이터에서 로그인 → 받기·미리 듣기·다듬기 확인 |
 | 종소리 다듬기(편집기) | 완료 | CI·로컬 빌드 통과 |
 | 날씨·지역 검색 | 완료 | 에뮬레이터에서 확인 |
 | 백업/불러오기·시간표 CSV | 완료 | 데스크톱과 서로 주고받기 확인 |
-| 앱 자동 업데이트 | 완료, **설치 단계는 확인 전** | 안드로이드 릴리스가 아직 없어서 '최신 버전이에요'까지만 확인 |
+| 앱 자동 업데이트 | 완료, **설치 단계는 확인 전** | 첫 릴리스 `android-v2.1.5`(2026-11-01). 다음 버전이 나와야 설치까지 확인 가능 |
 | 업데이트 기록 보기 | 완료 | `android/CHANGELOG.md` |
-| 예전 앱 데이터 옮기기 | 안 함(선택) | 아래 "남은 일" 3번 |
+| 예전 앱 데이터 옮기기 | 안 함(선택) | 아래 "남은 일" 4번 |
 | 실제 기기 시험 | **아직** | 에뮬레이터(Android 15, Pixel 7)에서만 확인 |
 
 ## 2026-11-01에 에뮬레이터에서 확인한 것
@@ -31,6 +32,34 @@
 - 시간표 CSV: 데스크톱이 만드는 파일과 바이트까지 같음
 - 업데이트 직후 '새로워진 점' 창 (설정값을 흉내 내서)
 - 확인 못 한 것: 한글 주소 검색(에뮬레이터 입력이 영문만 돼서), 업데이트 받기·설치, 실제 종 울림
+
+## YouTube 봇 확인과 구글 로그인 (2026-11-01 조사)
+
+- 이 PC가 있는 네트워크(IP)에서는 YouTube가 로그인 없는 요청을 모두 "로그인하여 봇이 아님을 확인하세요"로 막아요.
+  클라이언트 7가지(tv_samsung, tv, visionos, android_vr, ios, web, web_embedded)를 직접 물어봤고, PO 토큰을 붙인 web/mweb도 막혔어요.
+  **데스크톱도 같은 IP에서 똑같이 막히고**(`%APPDATA%\MaplTajong\youtube.log`), 구글 로그인 뒤에야 받아져요.
+- NewPipeExtractor 릴리스 v0.26.5는 Android 클라이언트를 반드시 먼저 쓰는데, NewPipe가 dev에서 "고장 난 클라이언트"로 뺐어요.
+  그래서 NewPipe 앱 dev가 쓰는 커밋 `e8f89145a`(visionOS만 씀)로 올렸어요 (`app/build.gradle.kts`). 막히지 않은 네트워크에서 확인 필요.
+- 이 추출기로는 지금 YouTube 플레이어(11a45ffb)의 **서명·n 파라미터 풀기가 둘 다 실패**해요(JVM으로 시험).
+  그래서 n·서명은 yt-dlp와 같은 풀이 스크립트로 직접 풀어요 (아래).
+- 로그인한 채로 시험한 결과 (에뮬레이터, 같은 IP):
+  - `tv_samsung`(TVHTML5 5.x) + 쿠키 + 세션 값 → **통과**. n만 풀면 받아져요 (n을 안 풀면 403).
+  - visionOS + 쿠키 → HTTP 400 / tv(7.x) → "페이지를 새로고침해야 합니다" / web → 주소 없는(SABR) 형식만 / web_embedded → "볼 수 없습니다".
+- 만든 것:
+  - `core/GoogleLogin.kt`: 쿠키 저장(`filesDir/youtube_cookies.txt`), SAPISIDHASH 인증 헤더(yt-dlp와 같은 방식, `_u` 세션 포함)
+  - `ui/screens/GoogleLoginScreen.kt`: 앱 안 WebView 로그인 창. 앱 표시(`; wv`, X-Requested-With)를 빼서 일반 브라우저처럼 보이게 함.
+    에뮬레이터에서 실제 구글 계정 로그인까지 됐어요.
+  - `core/Online.kt` `resolve(ctx, url)`: 로그인했으면 먼저 watch 페이지의 ytcfg(VISITOR_DATA, DATASYNC_ID, SESSION_INDEX)를 읽고
+    `tv_samsung`으로 묻고, 안 되면 로그인 없이(NewPipe). 실패만 `filesDir/youtube.log`에 남겨요.
+    막히면 데스크톱과 같은 문구("YouTube가 이 기기의 자동 다운로드를 막았어요. 구글 로그인을 하면 받을 수 있어요.").
+  - `core/JsChallenge.kt`: yt-dlp의 풀이 스크립트(`assets/ejs`, yt-dlp/ejs **0.8.0**, Unlicense)를 JavaScriptSandbox(V8)에서 돌려 n·서명을 풀어요.
+    플레이어는 iframe_api에서 번호를 찾아 `player_ias.vflset/en_US/base.js`를 받고, 분석 결과를 `filesDir/ejs/<번호>.js`에 보관(다음부터 빠름).
+    Android System WebView가 너무 오래돼 JavaScriptSandbox가 없으면 "WebView를 업데이트해 주세요"라고 알려요.
+  - 찾기 화면: 위쪽 "구글 로그인"/"구글 로그인됨", 막혔을 때 "구글 로그인" 버튼 → 로그인 뒤 하던 일 다시. 설정 → 정보 카드에 "YouTube 구글 로그인" 줄.
+- 확인한 것 (에뮬레이터, 로그인): 바로 추가(1:05 영상 전체), 다른 영상 미리 듣기(약 7초), 받아서 다듬기(파형까지), SoundCloud 미리 듣기.
+- **YouTube가 플레이어를 바꿔 n 풀기가 깨지면**: yt-dlp가 요구하는 ejs 버전(`pyproject.toml`의 `yt-dlp-ejs==`)을 보고,
+  그 버전의 `yt.solver.lib.min.js`·`yt.solver.core.min.js`를 GitHub 릴리스(yt-dlp/ejs)에서 받아
+  yt-dlp `jsc/_builtin/vendor/_info.py`의 SHA3-512와 맞춘 뒤 `assets/ejs`에 바꿔 넣어요. TV 클라이언트 버전 값도 yt-dlp `_base.py`를 따라가요.
 
 ## 로컬에서 빌드하기
 
@@ -75,7 +104,9 @@
 | `core/Alarms.kt` | 다음 종 하나만 `setAlarmClock`으로 걸기, 알람 받는 곳, 부팅/시간 변경 받는 곳 |
 | `core/BellService.kt` | 종 울리는 동안 앞에서 도는 서비스. 120초 넘게 늦으면 '놓침'으로 기록 |
 | `core/Sounds.kt` | 종소리 파일 관리, 재생기(100% 넘는 음량은 LoudnessEnhancer), 미리 듣기 |
-| `core/Online.kt` | YouTube·SoundCloud 검색, 소리 주소 찾기, 받기(나눠 받기 / HLS) |
+| `core/Online.kt` | YouTube·SoundCloud 검색, 소리 주소 찾기(구글 로그인 → 로그인 없이 순서), 받기(나눠 받기 / HLS), `youtube.log` |
+| `core/GoogleLogin.kt` | YouTube 구글 로그인 쿠키 저장·로그아웃, SAPISIDHASH 인증 헤더 |
+| `core/JsChallenge.kt` | YouTube 주소의 n·서명 풀기 (yt-dlp/ejs 스크립트를 JavaScriptSandbox에서) |
 | `core/AudioEdit.kt` | MediaCodec으로 풀어서 파형 만들기, 자르기·페이드·음량·크기 맞춤 → WAV 저장, 원본 보관 |
 | `core/Weather.kt` | MET Norway 예보(Expires/Last-Modified, `weather.json` 보관), Nominatim 지역 검색(1초 간격, 도로명 structured 먼저) |
 | `core/Backup.kt` | 데스크톱 backup.py 그대로: zip(`manifest.json`+`data.json`+`sounds/`), 불러오기, 시간표 CSV |
@@ -83,16 +114,18 @@
 | `ui/App.kt` | 탭/왼쪽 메뉴, 찾기·다듬기 화면 열기, 알림(토스트), 업데이트 직후 '새로워진 점' |
 | `ui/theme/Theme.kt` | 데스크톱과 같은 색, Pretendard 글꼴 |
 | `ui/components/` | 버튼·카드·스위치·시각 고르기·시트·확인 창·썸네일·날씨 그림(`WeatherIcon.kt`) 등 공통 부품 |
-| `ui/screens/` | 홈, 시간표, 종소리, 기록, 설정, 찾기, 다듬기, 지역 고르기(`PlaceSheet`), 업데이트 기록(`ChangelogSheet`) |
+| `ui/screens/` | 홈, 시간표, 종소리, 기록, 설정, 찾기, 다듬기, 지역 고르기(`PlaceSheet`), 업데이트 기록(`ChangelogSheet`), 구글 로그인(`GoogleLoginScreen`) |
 
 `android/CHANGELOG.md`는 빌드할 때 `copyChangelog` 작업이 앱 assets로 넣어요 (`app/build.gradle.kts`).
 
 ## 남은 일 (하면 좋은 순서)
 
-1. **실제 기기 시험** — 아래 "기기에서 꼭 확인할 것".
-2. **첫 안드로이드 릴리스로 업데이트 설치 확인** — 서명 키를 정한 뒤 `release/android-v…`로 올리고, 한 단계 낮은 버전을 깐 기기에서
+1. **막히지 않은 네트워크에서 로그인 없이 YouTube 받기 확인** — 휴대폰 데이터 등. NewPipeExtractor dev 커밋(visionOS)이 실제로 되는지.
+2. **실제 기기 시험** — 아래 "기기에서 꼭 확인할 것".
+3. **업데이트 설치 확인** — 2.1.5 릴리스 APK(배포용 키)를 깐 기기에서, 다음 버전(2.1.6)을 main에 올린 뒤
    설정 → 업데이트 → '업데이트'. 처음엔 '이 출처 허용'을 물어요. Android 12 이상은 두 번째부터 묻지 않고 설치될 수 있어요.
-3. **예전 앱 데이터 옮기기(선택)** — 예전 앱은 `mataf.db`(다른 표 구조: `volume_percent`, hour/minute 따로)와 `filesDir/sounds`. 요일 비트는 같아요. 같은 키로 서명해야 예전 데이터에 접근할 수 있어요.
+   로컬 디버그 빌드는 서명이 달라서 릴리스 APK 위에 덮어 설치할 수 없어요.
+4. **예전 앱 데이터 옮기기(선택)** — 예전 앱은 `mataf.db`(다른 표 구조: `volume_percent`, hour/minute 따로)와 `filesDir/sounds`. 요일 비트는 같아요. 같은 키로 서명해야 예전 데이터에 접근할 수 있어요.
 
 ## 기기에서 꼭 확인할 것
 

@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import com.milky.mataf.core.AppEvents
 import com.milky.mataf.core.AudioSource
 import com.milky.mataf.core.Found
+import com.milky.mataf.core.GoogleLogin
 import com.milky.mataf.core.Online
 import com.milky.mataf.core.Preview
 import com.milky.mataf.core.Sounds
@@ -64,6 +65,7 @@ import com.milky.mataf.ui.components.Empty
 import com.milky.mataf.ui.components.Field
 import com.milky.mataf.ui.components.IconBtn
 import com.milky.mataf.ui.components.NetImage
+import com.milky.mataf.ui.components.Pill
 import com.milky.mataf.ui.components.Segmented
 import com.milky.mataf.ui.components.Toasts
 import com.milky.mataf.ui.components.isWide
@@ -118,6 +120,9 @@ fun SearchScreen(onClose: () -> Unit, onEdit: (EditTarget) -> Unit) {
     var pvJob by remember { mutableStateOf<Job?>(null) }
     var dlJob by remember { mutableStateOf<Job?>(null) }
     val wide = isWide()
+    var loggedIn by remember { mutableStateOf(GoogleLogin.isLoggedIn(ctx)) }
+    var loggingIn by remember { mutableStateOf(false) }
+    var retry by remember { mutableStateOf<(() -> Unit)?>(null) }   // 막혔을 때 로그인 뒤 다시 할 일
 
     DisposableEffect(Unit) {
         onDispose { Preview.stop() }
@@ -127,8 +132,20 @@ fun SearchScreen(onClose: () -> Unit, onEdit: (EditTarget) -> Unit) {
         state = t; stateError = error; busy = isBusy
     }
 
+    if (loggingIn) GoogleLoginScreen { ok ->
+        loggingIn = false
+        if (ok) {
+            loggedIn = true
+            resolved.clear()
+            Toasts.show("구글 로그인했어요", "success")
+            setState("")
+            retry?.invoke()
+        }
+        retry = null
+    }
+
     suspend fun resolve(f: Found): AudioSource =
-        resolved[f.url] ?: withContext(Dispatchers.IO) { Online.resolve(f.url) }.also { resolved[f.url] = it }
+        resolved[f.url] ?: withContext(Dispatchers.IO) { Online.resolve(ctx, f.url) }.also { resolved[f.url] = it }
 
     fun search(q0: String = query) {
         val q = q0.trim()
@@ -174,6 +191,7 @@ fun SearchScreen(onClose: () -> Unit, onEdit: (EditTarget) -> Unit) {
                 throw e
             } catch (e: Exception) {
                 setState(Online.explain(e), error = true)
+                retry = { togglePreview(f) }
             } finally {
                 if (pvLoading == f.url) pvLoading = null
             }
@@ -216,6 +234,7 @@ fun SearchScreen(onClose: () -> Unit, onEdit: (EditTarget) -> Unit) {
                 file?.delete()
                 progress = -1f
                 setState(Online.explain(e), error = true)
+                retry = { download(edit) }
             }
         }
     }
@@ -233,6 +252,11 @@ fun SearchScreen(onClose: () -> Unit, onEdit: (EditTarget) -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Text("종소리 찾기", style = text(24, FontWeight.Bold))
                         Text("YouTube나 SoundCloud에서 소리만 받아 종소리로 만들어요.", style = text(13, color = C.grey600))
+                    }
+                    if (source == Online.YOUTUBE) {
+                        Spacer(Modifier.width(8.dp))
+                        if (loggedIn) Pill("구글 로그인됨", C.grey700, C.grey100)
+                        else Btn("구글 로그인", { retry = null; loggingIn = true }, style = BtnStyle.Soft, small = true)
                     }
                 }
                 Spacer(Modifier.height(14.dp))
@@ -285,6 +309,8 @@ fun SearchScreen(onClose: () -> Unit, onEdit: (EditTarget) -> Unit) {
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                     if (dlJob?.isActive == true) Btn("취소", { dlJob?.cancel(); setState("취소하고 있어요", isBusy = true) },
                         style = BtnStyle.Subtle, small = true)
+                    else if (stateError && Online.isBlocked(state)) Btn(if (loggedIn) "다시 로그인" else "구글 로그인",
+                        { loggingIn = true }, style = BtnStyle.Primary, small = true)
                 }
                 if (progress >= 0f) LinearProgressIndicator({ progress }, Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
                     color = C.accent, trackColor = C.grey100)

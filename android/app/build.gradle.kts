@@ -105,8 +105,13 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // YouTube·SoundCloud 검색과 소리 주소 (NewPipe 앱이 쓰는 라이브러리)
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
+    // YouTube·SoundCloud 검색과 소리 주소 (NewPipe 앱이 쓰는 라이브러리).
+    // 릴리스 v0.26.5 의 Android 클라이언트는 YouTube 가 막아서, NewPipe 앱 dev 가 쓰는 커밋(2026-10-21)을 쓴다.
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:e8f89145a830b4d6cae32412007f24ea8b36c73a")
+    // 구글 로그인 창(WebView)에서 앱 이름 헤더 빼기
+    implementation("androidx.webkit:webkit:1.12.1")
+    // YouTube 주소의 n 값·서명 풀기 스크립트를 돌리는 JavaScript 엔진 (core/JsChallenge.kt)
+    implementation("androidx.javascriptengine:javascriptengine:1.1.1")
 
     testImplementation("junit:junit:4.13.2")
 }
