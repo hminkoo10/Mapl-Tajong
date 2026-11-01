@@ -36,6 +36,7 @@ import com.milky.mataf.core.Alarms
 import com.milky.mataf.core.AppEvents
 import com.milky.mataf.core.Backup
 import com.milky.mataf.core.BellService
+import com.milky.mataf.core.GoogleLogin
 import com.milky.mataf.core.Preview
 import com.milky.mataf.core.Updater
 import com.milky.mataf.core.Updates
@@ -160,6 +161,23 @@ fun SettingsScreen(extra: @Composable () -> Unit = {}) {
     val updBusy = upd.state in setOf("checking", "downloading", "installing")
     val hasUpdate = upd.state in setOf("available", "ready") && upd.info != null
 
+    // ---------- 구글 로그인 ----------
+    var googleAt by remember { mutableStateOf(GoogleLogin.loggedInAt(ctx).takeIf { GoogleLogin.isLoggedIn(ctx) }) }
+    var loggingIn by remember { mutableStateOf(false) }
+    var askLogout by remember { mutableStateOf(false) }
+    if (loggingIn) GoogleLoginScreen { ok ->
+        loggingIn = false
+        if (ok) {
+            googleAt = GoogleLogin.loggedInAt(ctx)
+            Toasts.show("구글 로그인했어요", "success")
+        }
+    }
+    if (askLogout) ConfirmDialog("구글 로그아웃할까요?", "이 기기에 저장한 로그인 정보를 지워요.", "로그아웃", {
+        GoogleLogin.logout(ctx)
+        googleAt = null
+        Toasts.show("로그아웃했어요")
+    }, { askLogout = false }, danger = false)
+
     Page(16.dp) {
         PageHeader("설정")
         Card {
@@ -253,6 +271,14 @@ fun SettingsScreen(extra: @Composable () -> Unit = {}) {
         Card {
             Text("정보", style = text(17, FontWeight.Bold))
             Spacer(Modifier.height(6.dp))
+            val at = googleAt
+            SettingRow("YouTube 구글 로그인",
+                if (at != null) "로그인됨 · ${java.time.Instant.ofEpochMilli(at).atZone(java.time.ZoneId.systemDefault())
+                    .format(DateTimeFormatter.ofPattern("yyyy년 MM월 dd일"))}. YouTube에서 받을 때 이 계정을 써요."
+                else "YouTube가 막을 때 로그인하면 받을 수 있어요. 자주 쓰지 않는 계정이어도 돼요.") {
+                Btn(if (at != null) "로그아웃" else "로그인", { if (at != null) askLogout = true else loggingIn = true }, small = true)
+            }
+            Divider()
             SettingRow("만든 사람") { Text("구현민", style = text(14, color = C.grey700)) }
         }
     }
