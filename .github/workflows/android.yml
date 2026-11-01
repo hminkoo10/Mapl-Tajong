@@ -1,5 +1,5 @@
 # Android 앱 빌드·배포
-#   - claude/** 브랜치에 android/ 가 바뀌면: APK 를 빌드해 Actions 결과물로 올린다 (배포는 안 함)
+#   - dev/** 브랜치에 android/ 가 바뀌면: APK 를 빌드해 Actions 결과물로 올린다 (배포는 안 함)
 #   - release/android-vX.Y.Z 브랜치를 만들면: 빌드 → GitHub Release(태그 android-vX.Y.Z)에 APK 를 올린다
 # 서명 키는 저장소 비밀값 ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD 로 넣는다.
 # 비밀값이 없으면 시험용(디버그) 키로 서명한다.
@@ -7,7 +7,7 @@ name: Android
 
 on:
   push:
-    branches: ["claude/**", "release/android-v*"]
+    branches: ["dev/**", "release/android-v*"]
     paths: ["android/**", ".github/workflows/android.yml"]
   workflow_dispatch:
 

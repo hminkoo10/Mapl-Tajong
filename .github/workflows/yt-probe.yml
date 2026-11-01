@@ -3,7 +3,7 @@ name: YouTube probe
 
 on:
   push:
-    branches: ["claude/**"]
+    branches: ["dev/**"]
     paths: ["tools/yt_probe.py", ".github/workflows/yt-probe.yml", "app/core/youtube.py", "app/core/ffmpeg.py",
             "app/core/weather.py", "app/core/net.py", "tools/geo_probe.py"]
   workflow_dispatch:
