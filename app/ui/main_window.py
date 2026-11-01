@@ -1,18 +1,22 @@
+import re
 from datetime import datetime
 
 from PyQt6.QtCore import QDateTime, Qt, QTimer
 from PyQt6.QtGui import QAction, QCursor, QIcon
 from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QSystemTrayIcon, QWidget
 
-from app.core.paths import asset_path
+from app.core import cloud_sync
+from app.core import magoedu_cloud as cloud
+from app.core.paths import asset_path, sync_dir
 from app.core.player import SoundPlayer
 from app.core.scheduler import Scheduler
 from app.core.timeutil import ampm
 from app.core.version import APP_TITLE, APP_VERSION
+from app.data import repo
 from app.ui import icons
+from app.ui.cloud_update import RestartWatch
 from app.ui.context import AppContext
-from app.core.updater import notes_to_text
-from app.ui.dialogs import confirm, notify
+from app.ui.dialogs import confirm
 from app.ui.fullscreen_clock import FullscreenClock
 from app.ui.nav import NavSidebar
 from app.ui.select import Menu
@@ -22,14 +26,18 @@ from app.ui.pages.schedules import SchedulesPage
 from app.ui.pages.settings import SettingsPage
 from app.ui.pages.sounds import SoundsPage
 from app.ui.theme import C
-from app.ui.update_manager import UpdateManager
 from app.ui.widgets import AnimatedStack, Button, ToastManager
 
 NAV = [("dashboard", "홈"), ("calendar", "시간표"), ("bell", "종소리"), ("logs", "기록"), ("settings", "설정")]
 
 
+def _version_tuple(v):
+    nums = [int(x) for x in re.findall(r"\d+", str(v))[:3]]
+    return tuple(nums + [0] * (3 - len(nums)))
+
+
 class MainWindow(QMainWindow):
-    def __init__(self, conn, app):
+    def __init__(self, conn, app, session=None, prefer_local=False):
         super().__init__()
         self.conn = conn
         self.app = app
@@ -53,15 +61,26 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.stack, 1)
 
         self.scheduler.start()
-        self.updates = UpdateManager(self.ctx, self.quit_for_update)
-        self.ctx.updates = self.updates
+        self.sync = None
+        if session is not None:
+            # 통합 클라우드 동기화: 클라우드 파일을 먼저 적용하거나(있으면) 이 기기 것을 내보낸다
+            dev_id, dev_name = cloud_sync.device_identity(conn, session)
+            self.sync = cloud_sync.CloudSync(conn, sync_dir(), dev_id, dev_name, self.scheduler, self)
+            self.sync.remote_applied.connect(self.ctx.remote_changed)
+            self.sync.notice.connect(lambda text, kind: self.ctx.toast(text, kind, 4000))
+            self.scheduler.on_log = self.sync.log_added
+            self.scheduler.remote_logs = self.sync.remote_logs_on
+            self.ctx.sync = self.sync
+            self.sync.start(prefer_local)
+        self.restart_watch = None
+        if session is not None and not session.dev:
+            self.restart_watch = RestartWatch(self.ctx, self.restart_for_update)
         self.dashboard = DashboardPage(self.ctx)
         self.pages = [self.dashboard, SchedulesPage(self.ctx), SoundsPage(self.ctx), LogsPage(self.ctx),
                       SettingsPage(self.ctx)]
         for p in self.pages:
             self.stack.addWidget(p)
         self.nav.currentChanged.connect(lambda i: self.stack.switch_to(i))
-        self.updates.changed.connect(lambda: self.nav.list.set_badge(4, self.updates.has_update()))
         self.dashboard.openFullscreen.connect(self.open_fullscreen)
 
         btn_full = Button("전체화면 시계", variant="secondary")
@@ -94,16 +113,15 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(900, self._show_whats_new)
 
     def _show_whats_new(self):
-        got = self.updates.take_whats_new()
-        if not got:
+        """새 버전으로 다시 켜졌으면 바뀐 점을 보여 준다."""
+        seen = repo.get_setting(self.conn, "seen_version", "")
+        if seen != APP_VERSION:
+            repo.set_setting(self.conn, "seen_version", APP_VERSION)
+        if not seen or _version_tuple(seen) >= _version_tuple(APP_VERSION):
             return
-        version, notes = got
         from app.ui.changelog_dialog import ChangelogDialog, notes_for
-        if notes_for(version):
-            ChangelogDialog(self, only_version=version, title=f"{version} 버전으로 업데이트했어요").exec()
-            return
-        text = notes_to_text(notes) or "더 안정적으로 다듬었어요."
-        notify(self, f"{version} 버전으로 업데이트했어요", text)
+        if notes_for(APP_VERSION):
+            ChangelogDialog(self, only_version=APP_VERSION, title=f"{APP_VERSION} 버전으로 업데이트했어요").exec()
 
     # ---------------- 트레이 ----------------
     def _app_icon(self):
@@ -195,12 +213,17 @@ class MainWindow(QMainWindow):
         w.activateWindow()
         self._fullscreen = w
 
-    def _shutdown(self):
+    def _shutdown(self, code=0):
         try:
             self.scheduler.stop()
             self.player.stop()
         except Exception:
             pass
+        if self.sync is not None:
+            try:
+                self.sync.flush()
+            except Exception:
+                pass
         try:
             self.tray.hide()
         except Exception:
@@ -211,11 +234,11 @@ class MainWindow(QMainWindow):
             except RuntimeError:
                 pass
         self._really_quit = True
-        self.app.quit()
+        self.app.exit(code)
 
-    def quit_for_update(self):
-        """설치 파일이 프로그램 파일을 바꿀 수 있도록 바로 종료."""
-        self._shutdown()
+    def restart_for_update(self):
+        """통합 클라우드가 받아 둔 새 버전으로 다시 켜지도록 종료 코드 75 로 끝낸다."""
+        self._shutdown(cloud.RESTART_EXIT_CODE)
 
     def on_exit_app(self):
         if self.isHidden():

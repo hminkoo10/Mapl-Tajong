@@ -104,11 +104,11 @@ def decode_mono(path, rate=8000):
 
 
 def render(src, dst, audio_filter=None, rate=44100, channels=2):
-    """src를 필터 적용 후 16bit WAV로 저장."""
+    """src를 필터 적용 후 16bit WAV로 저장. (dst 가 .tmp 여도 WAV 가 되도록 형식을 직접 정한다)"""
     args = ["-y", "-i", str(src), "-vn"]
     if audio_filter:
         args += ["-af", audio_filter]
-    args += ["-ar", str(rate), "-ac", str(channels), "-c:a", "pcm_s16le", str(dst)]
+    args += ["-ar", str(rate), "-ac", str(channels), "-c:a", "pcm_s16le", "-f", "wav", str(dst)]
     r = _run(args, timeout=600, capture_stdout=False)
     if r.returncode != 0 or not Path(dst).exists():
         raise FfmpegError("오디오 변환에 실패했습니다.\n" + _tail(r.stderr))

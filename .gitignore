@@ -15,3 +15,6 @@ Thumbs.db
 
 .env
 .env.*
+
+# MAGOEDU_DEV=1 으로 소스에서 켤 때의 데이터
+.magoedu-dev/

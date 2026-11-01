@@ -35,18 +35,23 @@ class Scheduler:
         self.conn = conn
         self.player = player
         self.running = False
-        self.paused = False
+        self.paused = False           # 잠시 멈춤 (모든 기기가 함께, state.json 으로 맞춤)
+        self.ring_enabled = True      # 이 기기에서 종 울리기 (기기마다 따로)
         self.next_event = None
         self._last_second = None
         self._pause_cache = None      # (날짜, 오늘 쉼 여부)
         self._last_recompute = 0.0
-        # UI 알림용 콜백: on_ring(event, forced), on_event(kind, event)
+        # UI 알림용 콜백: on_ring(event, forced), on_event(kind, event), on_log() — 기록을 남긴 뒤
         self.on_ring = None
         self.on_event = None
+        self.on_log = None
+        # 다른 기기의 기록: remote_logs(날짜) → [{occurred_at, schedule_id, result, device_name, ...}]
+        self.remote_logs = None
 
     def start(self):
         self.running = True
-        self.paused = False
+        self.paused = repo.get_setting(self.conn, "paused", "0") == "1"
+        self.ring_enabled = repo.get_setting(self.conn, "ring_device", "1") != "0"
         self.recompute_next()
 
     def invalidate(self):
@@ -66,10 +71,18 @@ class Scheduler:
         return n > 0
 
     def pause(self):
-        self.paused = True
+        self.set_paused(True)
 
     def resume(self):
-        self.paused = False
+        self.set_paused(False)
+
+    def set_paused(self, on):
+        self.paused = bool(on)
+        repo.set_setting(self.conn, "paused", "1" if self.paused else "0")
+
+    def set_ring_enabled(self, on):
+        self.ring_enabled = bool(on)
+        repo.set_setting(self.conn, "ring_device", "1" if self.ring_enabled else "0")
 
     def stop(self):
         self.running = False
@@ -88,13 +101,51 @@ class Scheduler:
         return ev
 
     def ring_next_now(self):
+        """다음 종을 지금 울린다. 이 기기에서 종을 울리지 않으면 울린 것으로 표시만 한다 (울리기 요청은 부르는 쪽에서)."""
         ev = self.next_event
         if not ev:
             return None
-        self._ring(ev, forced=True)
+        if self.ring_enabled:
+            self._ring(ev, forced=True)
         repo.add_override(self.conn, self._date_of(ev), ev.schedule_id, "FIRED_ONCE", "forced")
         self.recompute_next()
         return ev
+
+    def ring_schedule_now(self, schedule_id, detail="forced"):
+        """다른 기기의 울리기 요청: 그 일정의 종을 지금 울리고, 다음 차례를 울린 것으로 표시한다."""
+        rows = repo.get_schedules(self.conn, [schedule_id])
+        if not rows:
+            return None
+        s = rows[0]
+        now = datetime.now()
+        run_at = self._next_run_of(s, now) or now
+        ev = NextEvent(int(s["id"]), str(s["name"]), run_at, str(s["sound_name"]), str(s["sound_file_name"]),
+                       _volume_of(s))
+        self._ring(ev, forced=True, detail=detail)
+        repo.add_override(self.conn, self._date_of(ev), ev.schedule_id, "FIRED_ONCE", "forced")
+        self.recompute_next()
+        return ev
+
+    @staticmethod
+    def _next_run_of(s, now):
+        """그 일정이 다음에 울릴 때 (8일 안에 없으면 None)"""
+        for day_offset in range(0, 8):
+            base = (now + timedelta(days=day_offset)).replace(hour=0, minute=0, second=0, microsecond=0)
+            if (int(s["weekday_mask"]) & weekday_bit(base)) == 0:
+                continue
+            run_at = next_dt(base, str(s["time_hhmm"]))
+            if day_offset == 0 and run_at <= now:
+                continue
+            return run_at
+        return None
+
+    def _log(self, occurred_at, ev, result, detail):
+        repo.insert_log(self.conn, occurred_at, ev.schedule_id, ev.name, ev.sound_name, result, detail)
+        if self.on_log:
+            try:
+                self.on_log()
+            except Exception:
+                pass
 
     def _emit(self, kind, ev):
         if self.on_event:
@@ -126,17 +177,20 @@ class Scheduler:
             return
 
         ev = self.next_event
+        if not self.ring_enabled:
+            # 이 기기에서는 울리지 않음: 소리도 기록도 없이 다음 종으로 넘어간다
+            self.recompute_next()
+            return
+
         late = int((now - ev.run_at).total_seconds())
         if late >= 5:
-            repo.insert_log(self.conn, now.strftime("%Y-%m-%d %H:%M:%S"), ev.schedule_id, ev.name,
-                            ev.sound_name, "MISSED", f"late={late}s")
+            self._log(now.strftime("%Y-%m-%d %H:%M:%S"), ev, "MISSED", f"late={late}s")
             self._emit("missed", ev)
             self.recompute_next()
             return
 
         if repo.has_override(self.conn, self._date_of(ev), ev.schedule_id, "SKIP_ONCE"):
-            repo.insert_log(self.conn, now.strftime("%Y-%m-%d %H:%M:%S"), ev.schedule_id, ev.name,
-                            ev.sound_name, "SKIPPED", "")
+            self._log(now.strftime("%Y-%m-%d %H:%M:%S"), ev, "SKIPPED", "")
             self._emit("skipped", ev)
             self.recompute_next()
             return
@@ -211,7 +265,7 @@ class Scheduler:
         base = now.replace(hour=0, minute=0, second=0, microsecond=0)
         bit = weekday_bit(now)
         set_id = repo.active_set_id(self.conn)
-        results = repo.today_results(self.conn, today)
+        results = self.today_results(today)
         overrides = repo.overrides_for_date(self.conn, today)
         paused_day = self.is_paused_today(today)
         nxt = self.next_event
@@ -223,9 +277,10 @@ class Scheduler:
             sid = int(s["id"])
             run_at = next_dt(base, str(s["time_hhmm"]))
             acts = overrides.get(sid, set())
+            result, device = results.get(sid, (None, None))
             if run_at <= now:
                 status = {"PLAYED": "played", "SKIPPED": "skipped", "FAILED": "failed",
-                          "MISSED": "missed"}.get(results.get(sid), "passed")
+                          "MISSED": "missed"}.get(result, "passed")
                 if status == "passed" and "SKIP_ONCE" in acts:
                     status = "skipped"
             else:
@@ -242,21 +297,58 @@ class Scheduler:
             out.append({
                 "id": sid, "date": today, "time": str(s["time_hhmm"]), "run_at": run_at, "name": str(s["name"]),
                 "sound": str(s["sound_name"]), "status": status,
+                "device": device if run_at <= now else None,   # 다른 기기 기록이면 그 기기 이름
             })
         return out
 
-    def _ring(self, ev, forced):
+    def _today_logs(self, today):
+        """오늘 기록 (이 기기 + 다른 기기). device_name 이 None 이면 이 기기."""
+        rows = [{"occurred_at": str(r["occurred_at"]), "schedule_id": r["schedule_id"],
+                 "schedule_name": r["schedule_name"], "result": str(r["result"]), "device_name": None}
+                for r in repo.logs_on(self.conn, today)]
+        if self.remote_logs:
+            try:
+                rows += list(self.remote_logs(today))
+            except Exception:
+                pass
+        # 같은 시각이면 '울림'을 뒤에 둔다 → 한 기기라도 울렸으면 '울림'
+        rows.sort(key=lambda r: (r["occurred_at"], r["result"] == "PLAYED"))
+        return rows
+
+    def today_results(self, today):
+        """오늘 각 일정의 마지막 결과 {schedule_id: (result, 다른 기기 이름 또는 None)}."""
+        out = {}
+        own = set()
+        for r in self._today_logs(today):
+            if r["schedule_id"] is None:
+                continue
+            sid = int(r["schedule_id"])
+            mine = r.get("device_name") is None
+            if mine or sid not in own:   # 이 기기 기록이 있으면 그것을 보여 준다
+                out[sid] = (r["result"], r.get("device_name"))
+            if mine:
+                own.add(sid)
+        return out
+
+    def played_count(self, today):
+        """오늘 울린 종 수. 여러 기기가 같은 종을 같은 분에 울렸으면 한 번으로 센다."""
+        seen = set()
+        for r in self._today_logs(today):
+            if r["result"] == "PLAYED":
+                seen.add((r["schedule_id"], r.get("schedule_name"), r["occurred_at"][:16]))
+        return len(seen)
+
+    def _ring(self, ev, forced, detail=None):
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
             p = sound_file_path(ev.sound_file_name)
             self.player.play(str(p), ev.volume, ev.sound_name)
-            repo.insert_log(self.conn, now_str, ev.schedule_id, ev.name, ev.sound_name, "PLAYED",
-                            "forced" if forced else "")
+            self._log(now_str, ev, "PLAYED", detail if detail is not None else ("forced" if forced else ""))
             if self.on_ring:
                 try:
                     self.on_ring(ev, forced)
                 except Exception:
                     pass
         except Exception as e:
-            repo.insert_log(self.conn, now_str, ev.schedule_id, ev.name, ev.sound_name, "FAILED", str(e))
+            self._log(now_str, ev, "FAILED", str(e))
             self._emit("failed", ev)

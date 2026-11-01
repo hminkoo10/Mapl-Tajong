@@ -1,8 +1,8 @@
 from PyQt6.QtCore import QDate
 from PyQt6.QtWidgets import QDateEdit, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QSpinBox, QVBoxLayout, QWidget
 
+from app.core import cloud_sync
 from app.core.backup import RESULT_LABELS, export_logs_csv
-from app.data import repo
 from app.ui import icons
 from app.ui.dialogs import notify
 from app.ui.select import Select
@@ -18,6 +18,19 @@ RESULT_STYLE = {
 }
 RESULT_TEXT = RESULT_LABELS
 RANGES = ["오늘", "7일", "30일", "전체", "직접"]
+THIS_DEVICE = "이 컴퓨터"
+
+
+def device_label(row):
+    return row.get("device_name") or THIS_DEVICE
+
+
+def detail_text(detail):
+    """'forced' → '수동 타종', 'forced · 원장님 폰' → '수동 타종 · 원장님 폰'"""
+    detail = str(detail or "")
+    if detail == "forced" or detail.startswith("forced · "):
+        return "수동 타종" + detail[len("forced"):]
+    return detail
 
 
 class LogsPage(QWidget):
@@ -30,7 +43,7 @@ class LogsPage(QWidget):
         root.setContentsMargins(28, 26, 28, 20)
         root.setSpacing(16)
 
-        header = PageHeader("기록", "종이 언제 울렸는지, 건너뛰었는지 볼 수 있어요.")
+        header = PageHeader("기록", "종이 언제 울렸는지, 건너뛰었는지 볼 수 있어요. 같은 아이디로 연결한 다른 기기 기록도 함께 보여요.")
         self.limit = page_field(QSpinBox())
         self.limit.setRange(50, 5000)
         self.limit.setSingleStep(50)
@@ -83,7 +96,7 @@ class LogsPage(QWidget):
         bwrap.addWidget(self.dates_bar)
         root.addLayout(bwrap)
 
-        self.table = SmartTable(["", "시간", "결과", "이벤트", "종소리", "상세"])
+        self.table = SmartTable(["", "시간", "결과", "이벤트", "종소리", "기기", "상세"])
         self.table.setColumnHidden(0, True)
         self.table.setItemDelegateForColumn(2, PillDelegate(self.table))
         hdr = self.table.horizontalHeader()
@@ -93,7 +106,9 @@ class LogsPage(QWidget):
         self.table.setColumnWidth(2, 90)
         hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(5, 130)
+        hdr.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setDefaultSectionSize(48)
         root.addWidget(self.table, 1)
         self.footer = QLabel("")
@@ -112,6 +127,7 @@ class LogsPage(QWidget):
         self.table.cellDoubleClicked.connect(self.on_detail)
         ctx.rang.connect(lambda *_: self.refresh())
         ctx.scheduler_event.connect(lambda *_: self.refresh())
+        ctx.data_changed.connect(lambda w: self.refresh() if w == "logs" and self.isVisible() else None)
         self.refresh()
 
     def on_enter(self):
@@ -133,7 +149,9 @@ class LogsPage(QWidget):
 
     def refresh(self):
         a, b = self._dates()
-        rows = repo.list_logs(self.conn, a, b, self.result.currentData(), self.keyword.text().strip(), self.limit.value())
+        remote = self.ctx.sync.remote_rows() if self.ctx.sync is not None else []
+        rows = cloud_sync.list_logs(self.conn, remote, a, b, self.result.currentData(), self.keyword.text().strip(),
+                                    self.limit.value())
         self._rows = rows
         t = self.table
         t.setUpdatesEnabled(False)
@@ -144,14 +162,14 @@ class LogsPage(QWidget):
             counts[res] = counts.get(res, 0) + 1
             fg, bg = RESULT_STYLE.get(res, (C.neutral, C.neutral_soft))
             t.set_cell(i, 0, "")
-            t.set_row_id(i, int(l["id"]))
+            t.set_row_id(i, int(l["id"]) if l["id"] is not None else -(i + 1))
             t.set_cell(i, 1, str(l["occurred_at"])[:16], fg=C.grey600)
             t.set_cell(i, 2, "", data=(RESULT_TEXT.get(res, res), fg, bg))
             t.set_cell(i, 3, str(l["schedule_name"] or ""))
             t.set_cell(i, 4, str(l["sound_name"] or ""), fg=C.grey600)
-            detail = str(l["detail"] or "")
-            detail = {"forced": "수동 타종"}.get(detail, detail)
-            t.set_cell(i, 5, detail, fg=C.grey400, tooltip=detail or None)
+            t.set_cell(i, 5, device_label(l), fg=C.grey600 if l.get("device_name") else C.grey400)
+            detail = detail_text(l["detail"])
+            t.set_cell(i, 6, detail, fg=C.grey400, tooltip=detail or None)
         t.setUpdatesEnabled(True)
         parts = [f"{RESULT_TEXT.get(k, k)} {v}" for k, v in sorted(counts.items(), key=lambda x: -x[1])]
         self.footer.setText(f"{len(rows)}건" + (" · " + " · ".join(parts) if parts else ""))
@@ -161,8 +179,8 @@ class LogsPage(QWidget):
             return
         l = self._rows[row]
         notify(self, l["schedule_name"] or "기록",
-               f"{l['occurred_at']}\n{RESULT_TEXT.get(l['result'], l['result'])} · {l['sound_name'] or '-'}"
-               + (f"\n\n{l['detail']}" if l["detail"] else ""))
+               f"{l['occurred_at']} · {device_label(l)}\n{RESULT_TEXT.get(l['result'], l['result'])} · {l['sound_name'] or '-'}"
+               + (f"\n\n{detail_text(l['detail'])}" if l["detail"] else ""))
 
     def on_export(self):
         from datetime import datetime

@@ -1,22 +1,24 @@
-"""Windows 빌드: PyInstaller(폴더형) → Inno Setup 설치 파일 → SHA-256.
+"""Windows 빌드: PyInstaller(폴더형) → 마고에듀 통합 클라우드용 묶음 파일(zip) → SHA-256.
 
 사용법 (Windows, 프로젝트 폴더에서):
-    python tools\\build.py            # 실행 파일 + 설치 파일
-    python tools\\build.py --no-installer
+    python tools\\build.py            # 실행 파일 폴더 + 묶음 파일
+    python tools\\build.py --no-zip   # 실행 파일 폴더만
 
 결과:
-    dist\\Mataf\\Mataf.exe                         (설치 없이 실행해 볼 수 있는 폴더)
-    dist\\installer\\MaplTajong-Setup-x.y.z.exe     (배포용 설치 파일)
-    dist\\installer\\MaplTajong-Setup-x.y.z.exe.sha256
+    dist\\Mataf\\Mataf.exe                          (실행 파일 폴더, magoedu-app.json 포함)
+    dist\\MaplTajong-x.y.z-win-x64.zip             (배포용 묶음 파일 — 통합 클라우드가 받아 설치)
+    dist\\MaplTajong-x.y.z-win-x64.zip.sha256
 """
 import argparse
 import hashlib
 import importlib.util
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,7 +106,7 @@ def find_pot():
     return None
 
 
-# 쓰지 않는 Qt 파일 (_internal 기준). 설치 파일과 업데이트 크기를 줄인다.
+# 쓰지 않는 Qt 파일 (_internal 기준). 묶음 파일과 업데이트 크기를 줄인다.
 PRUNE = [
     "PyQt6/Qt6/translations",
     "PyQt6/Qt6/plugins/tls",
@@ -191,32 +193,36 @@ def build_exe(version, icon, need_deno=True):
     return exe.parent
 
 
-def find_iscc():
-    cands = [os.environ.get("ISCC"), shutil.which("iscc"), shutil.which("ISCC")]
-    for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"),
-                 os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs")):
-        if base:
-            cands.append(os.path.join(base, "Inno Setup 6", "ISCC.exe"))
-    for c in cands:
-        if c and Path(c).exists():
-            return c
-    return None
+def write_manifest(app_dir, version):
+    """magoedu-app.json (저장소 맨 위) 에 버전을 넣어 실행 파일 폴더에 둔다. 통합 클라우드가 이것을 읽는다."""
+    m = json.loads((ROOT / "magoedu-app.json").read_text(encoding="utf-8"))
+    m["version"] = version
+    exe = m.get("exe", "")
+    if not (app_dir / exe).exists():
+        sys.exit(f"magoedu-app.json 의 exe({exe})가 {app_dir} 에 없어요.")
+    (app_dir / "magoedu-app.json").write_text(json.dumps(m, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def build_installer(version, source_dir, icon):
-    iscc = find_iscc()
-    if not iscc:
-        sys.exit("Inno Setup 6(ISCC.exe)을 찾지 못했어요. https://jrsoftware.org/isdl.php 에서 설치해 주세요.")
-    out = DIST / "installer"
-    out.mkdir(parents=True, exist_ok=True)
-    run([iscc, f"/DAppVersion={version}", f"/DSourceDir={source_dir}", f"/DOutputDir={out}",
-         f"/DSetupIcon={icon}", ROOT / "installer" / "MaplTajong.iss"])
-    setup = out / f"MaplTajong-Setup-{version}.exe"
-    if not setup.exists():
-        sys.exit("설치 파일이 만들어지지 않았어요.")
-    digest = hashlib.sha256(setup.read_bytes()).hexdigest()
-    (out / (setup.name + ".sha256")).write_text(f"{digest}  {setup.name}\n", encoding="utf-8")
-    return setup
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def build_zip(version, app_dir):
+    """실행 파일 폴더의 내용을 zip 맨 위에 담는다 (magoedu-app.json 포함)."""
+    out = DIST / f"MaplTajong-{version}-win-x64.zip"
+    part = out.with_name(out.name + ".part")
+    files = sorted(f for f in app_dir.rglob("*") if f.is_file())
+    with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in files:
+            z.write(f, f.relative_to(app_dir).as_posix())
+    part.replace(out)
+    (DIST / (out.name + ".sha256")).write_text(f"{_sha256(out)}  {out.name}\n", encoding="utf-8")
+    print(f"묶음 파일: {out.name} ({out.stat().st_size / 1048576:.1f}MB, 파일 {len(files)}개)", flush=True)
+    return out
 
 
 def main():
@@ -227,18 +233,19 @@ def main():
         except Exception:
             pass
     ap = argparse.ArgumentParser()
-    ap.add_argument("--no-installer", action="store_true", help="설치 파일은 만들지 않음")
+    ap.add_argument("--no-zip", action="store_true", help="묶음 파일(zip)은 만들지 않음")
     ap.add_argument("--no-deno", action="store_true", help="deno 없이 빌드 (YouTube 받기가 제한될 수 있음)")
     a = ap.parse_args()
     version = app_version()
     print(f"마고 타종 {version} 빌드", flush=True)
     icon = windows_icon()
     src = build_exe(version, icon, need_deno=not a.no_deno)
-    if a.no_installer:
+    write_manifest(src, version)
+    if a.no_zip:
         print(f"완료: {src}")
         return
-    setup = build_installer(version, src, icon)
-    print(f"완료: {setup}")
+    pack = build_zip(version, src)
+    print(f"완료: {pack}")
 
 
 if __name__ == "__main__":

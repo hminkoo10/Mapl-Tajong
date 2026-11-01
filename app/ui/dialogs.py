@@ -711,3 +711,27 @@ def notify(parent, title, text, icon_name=None):
     d = ConfirmDialog(title, text, "확인", False, icon_name, parent)
     d.btn_cancel.hide()
     d.exec()
+
+
+def choose_first_sync(parent=None):
+    """처음 연결할 때 클라우드 시간표와 이 컴퓨터 시간표가 다르면 무엇을 쓸지. 'cloud'(기본) 또는 'local'."""
+    d = BaseDialog("클라우드에 이미 시간표가 있어요", "", None, parent, 480)
+    lbl = QLabel("이 컴퓨터에서 따로 쓰던 시간표와 달라요. 어느 쪽을 쓸까요?\n\n"
+                 "· 클라우드 시간표 쓰기: 이 컴퓨터 시간표는 백업 파일로 남겨 둬요.\n"
+                 "· 이 컴퓨터 시간표로 바꾸기: 같은 아이디로 연결한 다른 기기도 이 시간표로 바뀌어요.")
+    lbl.setWordWrap(True)
+    lbl.setStyleSheet(f"font-size: 15px; color: {C.grey700};")
+    lbl.ensurePolished()
+    lbl.setMinimumHeight(lbl.heightForWidth(480))   # 줄바꿈한 글이 잘리지 않게
+    d.body.addWidget(lbl)
+    d.btn_ok.setText("클라우드 시간표 쓰기")
+    choice = ["cloud"]
+
+    def use_local():
+        choice[0] = "local"
+        d.accept()
+    d.btn_cancel.setText("이 컴퓨터 시간표로 바꾸기")
+    d.btn_cancel.clicked.disconnect(d.reject)
+    d.btn_cancel.clicked.connect(use_local)
+    d.exec()   # 닫기(X)·Esc 도 기본값(클라우드)
+    return choice[0]

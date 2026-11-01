@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.core.paths import sounds_dir
+from app.core.sound_files import write_atomic
 from app.core.version import APP_VERSION
 
 FORMAT = 1
@@ -27,7 +28,8 @@ def default_backup_name():
     return f"마고타종_백업_{datetime.now().strftime('%Y%m%d_%H%M')}.zip"
 
 
-def export_backup(conn, dst):
+def export_backup(conn, dst, sounds_from=None):
+    """sounds_from: 종소리 파일이 있는 폴더 (없으면 지금 종소리 폴더)"""
     dst = Path(dst)
     data = {}
     for table, cols in _TABLES.items():
@@ -51,13 +53,18 @@ def export_backup(conn, dst):
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         z.writestr("data.json", json.dumps(data, ensure_ascii=False, indent=2))
-        sd = sounds_dir()
+        sd = Path(sounds_from) if sounds_from else sounds_dir()
         for s in data["sounds"]:
             f = sd / s["file_name"]
             if f.exists():
                 z.write(f, f"sounds/{s['file_name']}")
     tmp.replace(dst)
     return manifest
+
+
+def _extract(z, member, path):
+    with z.open(member) as fsrc, open(path, "wb") as fdst:
+        shutil.copyfileobj(fsrc, fdst)
 
 
 def read_manifest(src):
@@ -89,8 +96,7 @@ def import_backup(conn, src, before_replace_files=None):
             s["file_name"] = fn
             member = f"sounds/{fn}"
             if member in names:
-                with z.open(member) as fsrc, open(sd / fn, "wb") as fdst:
-                    shutil.copyfileobj(fsrc, fdst)
+                write_atomic(sd / fn, lambda tmp, m=member: _extract(z, m, tmp))
 
     try:
         conn.commit()
@@ -138,9 +144,10 @@ RESULT_LABELS = {
 
 
 def export_logs_csv(rows, path):
-    _write_csv(path, ["시간", "결과", "이벤트", "종소리", "상세"], [
+    """rows: 기록 화면의 줄 (device_name 이 없으면 이 컴퓨터 기록)"""
+    _write_csv(path, ["시간", "결과", "이벤트", "종소리", "기기", "상세"], [
         (r["occurred_at"], RESULT_LABELS.get(r["result"], r["result"]), r["schedule_name"] or "",
-         r["sound_name"] or "", r["detail"] or "")
+         r["sound_name"] or "", dict(r).get("device_name") or "이 컴퓨터", r["detail"] or "")
         for r in rows
     ])
 

@@ -2,11 +2,10 @@ from datetime import datetime
 
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QProgressBar, QScrollArea, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from app.core import backup, ffmpeg, weather, youtube, ytpot
 from app.core.paths import app_data_dir
-from app.core.startup import disable_startup, enable_startup, is_startup_enabled, is_supported
 from app.core.version import APP_VERSION, DEVELOPER
 from app.data import repo
 from app.ui.dialogs import confirm, notify
@@ -68,12 +67,12 @@ class SettingsPage(QWidget):
         gen = Card(padding=24)
         gen.body.setSpacing(0)
         gen.body.addWidget(_title("일반"))
-        self.chk_startup = ToggleSwitch("")
-        self.chk_startup.setChecked(is_startup_enabled())
-        self.chk_startup.setEnabled(is_supported())
-        self.chk_startup.toggled.connect(self.on_toggle_startup)
+        self.chk_ring = ToggleSwitch("")
+        self.chk_ring.setChecked(ctx.scheduler.ring_enabled)
+        self.chk_ring.toggled.connect(self.on_toggle_ring)
         gen.body.addSpacing(6)
-        gen.body.addWidget(_row("컴퓨터를 켜면 자동으로 실행", "트레이에서 조용히 시작해요.", self.chk_startup))
+        gen.body.addWidget(_row("이 기기에서 종 울리기", "끄면 시간표만 맞추고 이 컴퓨터에서는 종이 울리지 않아요.",
+                                self.chk_ring))
         left.addWidget(gen)
 
         fs = Card(padding=24)
@@ -120,40 +119,15 @@ class SettingsPage(QWidget):
         left.addStretch(1)
         cols.addLayout(left, 3)
 
-        upd = Card(padding=24)
-        upd.body.setSpacing(0)
-        upd.body.addWidget(_title("업데이트"))
-        upd.body.addSpacing(6)
-        self.btn_update = Button("확인", variant="secondary")
-        self.upd_row = _row(f"버전 {APP_VERSION}", " ", self.btn_update)
-        self.upd_status = self.upd_row.findChildren(QLabel)[1]
-        upd.body.addWidget(self.upd_row)
-        self.upd_progress = QProgressBar()
-        self.upd_progress.setRange(0, 1000)
-        self.upd_progress.hide()
-        upd.body.addWidget(self.upd_progress)
-        upd.body.addWidget(hline())
-        self.chk_auto_update = ToggleSwitch("")
-        upd.body.addWidget(_row("자동으로 업데이트",
-                                "새 버전이 나오면 받아 두었다가, 다음 종까지 10분 넘게 남았을 때 조용히 설치해요.",
-                                self.chk_auto_update))
-        upd.body.addWidget(hline())
-        self.btn_history = Button("보기", variant="secondary")
-        upd.body.addWidget(_row("업데이트 기록", "버전마다 무엇이 바뀌었는지 볼 수 있어요.", self.btn_history))
-        self.notes_row = QWidget()
-        nl = QVBoxLayout(self.notes_row)
-        nl.setContentsMargins(0, 0, 0, 0)
-        nl.setSpacing(0)
-        nl.addWidget(hline())
-        self.btn_notes = Button("보기", variant="secondary")
-        nl.addWidget(_row("새 버전에서 바뀌는 점", "", self.btn_notes))
-        upd.body.addWidget(self.notes_row)
-        self.notes_row.hide()
-
         info = Card(padding=24)
         info.body.setSpacing(0)
         info.body.addWidget(_title("정보"))
         info.body.addSpacing(6)
+        self.btn_history = Button("업데이트 기록", variant="secondary")
+        info.body.addWidget(_row(f"버전 {APP_VERSION}",
+                                 "새 버전은 통합 클라우드가 받아 두고, 종이 멀 때 저절로 다시 켜져요.",
+                                 self.btn_history))
+        info.body.addWidget(hline())
         info.body.addWidget(_row("만든 사람", "", _value(DEVELOPER)))
         info.body.addWidget(hline())
         ok_ff = ffmpeg.available()
@@ -179,7 +153,6 @@ class SettingsPage(QWidget):
         info.body.addStretch(1)
         rcol = QVBoxLayout()
         rcol.setSpacing(16)
-        rcol.addWidget(upd)
         rcol.addWidget(info)
         rcol.addStretch(1)
         cols.addLayout(rcol, 2)
@@ -202,47 +175,6 @@ class SettingsPage(QWidget):
         self.btn_sched_csv.clicked.connect(self.on_sched_csv)
         self.btn_folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_data_dir()))))
         self.btn_history.clicked.connect(self._show_history)
-
-        self.um = ctx.updates
-        if self.um is not None:
-            self.chk_auto_update.setChecked(self.um.auto)
-            self.chk_auto_update.setEnabled(self.um.installed)
-            self.chk_auto_update.toggled.connect(self.um.set_auto)
-            self.btn_update.clicked.connect(self._on_update_button)
-            self.btn_notes.clicked.connect(self._show_notes)
-            self.um.changed.connect(self._sync_update)
-            self._sync_update()
-
-    def _sync_update(self):
-        um = self.um
-        text = um.status_text()
-        if not um.installed and um.state in ("idle", "latest"):
-            text += " · 자동 업데이트는 설치 버전에서만 돼요"
-        self.upd_status.setText(text)
-        st = um.state
-        if st in ("available", "ready") and um.info is not None:
-            self.btn_update.setText("업데이트" if um.installed else "받으러 가기")
-            self.btn_update.set_variant("primary")
-        else:
-            self.btn_update.setText("확인")
-            self.btn_update.set_variant("secondary")
-        self.btn_update.setEnabled(st not in ("checking", "downloading", "installing"))
-        self.btn_update.updateGeometry()
-        self.upd_progress.setVisible(st == "downloading")
-        self.upd_progress.setValue(int(um.progress * 1000))
-        self.notes_row.setVisible(um.info is not None and bool(um.info.notes.strip()))
-
-    def _on_update_button(self):
-        if self.um.state in ("available", "ready") and self.um.info is not None:
-            self.um.install_now()
-        else:
-            self.um.check(manual=True)
-
-    def _show_notes(self):
-        from app.core.updater import notes_to_text
-        if self.um.info is None:
-            return
-        notify(self, f"{self.um.info.version}에서 새로워진 점", notes_to_text(self.um.info.notes) or "-")
 
     def _on_weather_toggle(self, on):
         repo.set_setting(self.conn, "weather_on", "1" if on else "0")
@@ -291,12 +223,11 @@ class SettingsPage(QWidget):
                 self.ctx.toast("구글 로그인했어요", "success")
         self._sync_google()
 
-    def on_toggle_startup(self, on):
-        try:
-            enable_startup() if on else disable_startup()
-            self.ctx.toast("자동 실행을 켰어요" if on else "자동 실행을 껐어요", "success")
-        except Exception as e:
-            notify(self, "설정하지 못했어요", str(e))
+    def on_toggle_ring(self, on):
+        self.ctx.scheduler.set_ring_enabled(on)
+        self.ctx.data_changed.emit("device")
+        self.ctx.toast("이 컴퓨터에서 종을 울려요" if on else "이 컴퓨터에서는 종을 울리지 않아요",
+                       "success" if on else "info")
 
     def on_backup(self):
         path, _ = QFileDialog.getSaveFileName(self, "백업 파일 저장", backup.default_backup_name(), "백업 파일 (*.zip)")

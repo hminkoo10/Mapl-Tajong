@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "id": "tajong",
+  "exe": "Mataf.exe",
+  "sync": {
+    "include": ["config.json", "state.json", "sounds/**", "logs/**"],
+    "exclude": ["**/*.tmp"]
+  }
+}

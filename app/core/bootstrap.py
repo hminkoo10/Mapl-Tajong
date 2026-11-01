@@ -1,5 +1,5 @@
-import shutil
 from app.core.paths import sounds_dir, asset_path
+from app.core.sound_files import copy_atomic
 
 def seed_if_empty(conn):
     src_dir = asset_path("sounds")
@@ -25,7 +25,7 @@ def seed_if_empty(conn):
 
         dst = dst_dir / p.name
         if not dst.exists():
-            shutil.copy2(p, dst)
+            copy_atomic(p, dst)
 
         conn.execute(
             "INSERT INTO sounds(name, file_name, volume) VALUES (?,?,?)",

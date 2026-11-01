@@ -1,4 +1,9 @@
-"""종소리 파일 관리: 추가, 편집 저장, 원본 보관/복원, 길이 계산."""
+"""종소리 파일 관리: 추가, 편집 저장, 원본 보관/복원, 길이 계산.
+
+종소리 폴더는 통합 클라우드가 실시간으로 올리는 동기화 폴더라서, 파일은 언제나 같은 폴더의 <이름>.tmp 에
+다 쓴 뒤 최종 이름으로 바꾼다 (원자적 저장). .tmp 는 동기화하지 않는다 (magoedu-app.json 의 exclude).
+"""
+import os
 import re
 import shutil
 import time
@@ -21,6 +26,63 @@ def safe_stem(name, fallback="sound"):
     return (s or fallback)[:60]
 
 
+TMP_SUFFIX = ".tmp"
+
+
+def tmp_path(dst):
+    """dst 와 같은 폴더의 임시 파일 경로 (<이름>.tmp)"""
+    dst = Path(dst)
+    return dst.with_name(dst.name + TMP_SUFFIX)
+
+
+def _replace(tmp, dst, tries=5):
+    for i in range(tries):
+        try:
+            os.replace(tmp, dst)
+            return
+        except PermissionError:   # 잠깐 잠겨 있을 수 있음 (다른 프로그램이 읽는 중)
+            if i == tries - 1:
+                raise
+            time.sleep(0.05 * (i + 1))
+
+
+def write_atomic(dst, produce):
+    """produce(임시 경로)가 같은 폴더의 <이름>.tmp 를 다 만들면 최종 이름으로 바꾼다.
+    중간에 실패하면 임시 파일을 지우고, 원래 있던 dst 는 그대로 둔다."""
+    dst = Path(dst)
+    tmp = tmp_path(dst)
+    try:
+        produce(tmp)
+        _replace(tmp, dst)
+    except BaseException:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    return dst
+
+
+def copy_atomic(src, dst):
+    return write_atomic(dst, lambda tmp: shutil.copy2(src, tmp))
+
+
+def remove_leftover_tmp(folder):
+    """갑자기 꺼져서 남은 .tmp 를 지운다 (켤 때, 아직 아무것도 쓰지 않을 때만 부를 것)."""
+    n = 0
+    try:
+        files = [p for p in Path(folder).iterdir() if p.is_file() and p.name.endswith(TMP_SUFFIX)]
+    except OSError:
+        return 0
+    for p in files:
+        try:
+            p.unlink()
+            n += 1
+        except OSError:
+            pass
+    return n
+
+
 def unique_path(stem, ext):
     d = sounds_dir()
     ext = ext if ext.startswith(".") else "." + ext
@@ -40,16 +102,12 @@ def import_file(src):
     stem = safe_stem(src.stem)
     if src.suffix.lower() in PLAYABLE_EXTS:
         dst = unique_path(stem, src.suffix.lower())
-        shutil.copy2(src, dst)
+        copy_atomic(src, dst)
     else:
         if not ffmpeg.available():
             raise RuntimeError("이 형식은 변환이 필요한데 ffmpeg를 찾을 수 없습니다. wav/mp3/ogg 파일을 사용해 주세요.")
         dst = unique_path(stem, ".wav")
-        try:
-            ffmpeg.render(src, dst)
-        except Exception:
-            dst.unlink(missing_ok=True)
-            raise
+        write_atomic(dst, lambda tmp: ffmpeg.render(src, tmp))
     return dst
 
 
@@ -62,11 +120,7 @@ def add_sound_from_file(conn, src, name, volume=1.0):
 def render_edit_new(src, params: EditParams, duration, name):
     """편집 결과를 새 파일로 만든다 (작업 스레드용). 만든 경로를 돌려준다."""
     dst = unique_path(safe_stem(name), ".wav")
-    try:
-        render_edit(src, dst, params, duration)
-    except Exception:
-        dst.unlink(missing_ok=True)
-        raise
+    write_atomic(dst, lambda tmp: render_edit(src, tmp, params, duration))
     return dst
 
 
@@ -108,10 +162,10 @@ def commit_overwrite(conn, player, sound_row, tmp):
 
     player.release(str(cur))
     if cur.suffix.lower() == ".wav":
-        shutil.move(str(tmp), str(cur))
+        write_atomic(cur, lambda t: shutil.move(str(tmp), str(t)))
     else:
         new = unique_path(safe_stem(cur.stem), ".wav")
-        shutil.move(str(tmp), str(new))
+        write_atomic(new, lambda t: shutil.move(str(tmp), str(t)))
         repo.update_sound_file(conn, sid, new.name)
         try:
             cur.unlink()
@@ -135,7 +189,7 @@ def restore_original(conn, player, sound_row):
             cur.unlink()
         except OSError:
             pass
-    shutil.copy2(bak, target)
+    copy_atomic(bak, target)
     if orig_name != str(sound_row["file_name"]):
         repo.update_sound_file(conn, sid, orig_name)
     bak.unlink()

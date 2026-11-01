@@ -9,18 +9,22 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QGuiApplication, QIcon
+from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtGui import QDesktopServices, QGuiApplication, QIcon
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-from app.core.bootstrap import seed_if_empty
+from app.core import cloud_sync
+from app.core import magoedu_cloud as cloud
+from app.core import paths
 from app.core.paths import APP_NAME, app_data_dir, asset_path, resource_path, ui_cache_dir
 from app.core.single_instance import acquire
-from app.core.startup import sync_startup_path
+from app.core.startup import legacy_app_running, remove_legacy_autostart
 from app.core.watchdog import HangWatch, enable_crash_log
-from app.data.db import connect, init_schema
 from app.ui.main_window import MainWindow
 from app.ui.theme import app_font, build_stylesheet, load_fonts, reset_font_cache
+
+APP_ID = "tajong"
+CLOUD_URL = "https://mago.milky.kr"
 
 
 def read_schema():
@@ -53,22 +57,50 @@ def _set_app_id():
             pass
 
 
-def _setup_running():
-    """업데이트 설치 파일이 돌고 있는지 (설치 파일이 세우는 표시로 확인)."""
-    if sys.platform != "win32" or "--after-setup" in sys.argv:
+def _cloud_installed():
+    """통합 클라우드가 설치되어 있는지 (magoedu:// 주소를 열 수 있음)."""
+    if sys.platform != "win32":
         return False
     try:
-        import ctypes
-        h = ctypes.windll.kernel32.OpenMutexW(0x00100000, False, "MaplTajongSetupRunning")
-        if h:
-            ctypes.windll.kernel32.CloseHandle(h)
-            return True
-    except Exception:
-        pass
-    return False
+        import winreg
+        winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\magoedu"))
+        return True
+    except OSError:
+        return False
+
+
+def _without_cloud():
+    """통합 클라우드에서 켜지 않았을 때. 통합 클라우드가 있으면 조용히 넘겨서 켜 달라고 하고 끝낸다."""
+    launched = bool(os.environ.get("MAGOEDU_TICKET"))  # 통합 클라우드가 켰는데 확인이 안 됨 → 다시 넘기지 않음
+    if not launched and _cloud_installed() and cloud.open_cloud(APP_ID):
+        return
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    if launched:
+        text = cloud.REASON
+    else:
+        text = ("마고 타종은 마고에듀 통합 클라우드에서 켜요.\n"
+                "통합 클라우드를 설치하고 로그인한 뒤 ‘마고 타종’을 열어 주세요.")
+    box = QMessageBox(QMessageBox.Icon.Information, "마고에듀 통합 클라우드", text)
+    get = box.addButton("통합 클라우드 받기", QMessageBox.ButtonRole.AcceptRole)
+    box.addButton("닫기", QMessageBox.ButtonRole.RejectRole)
+    box.exec()
+    if box.clickedButton() is get:
+        QDesktopServices.openUrl(QUrl(CLOUD_URL))
+
+
+def _ask_first_sync():
+    from app.ui.dialogs import choose_first_sync
+    return choose_first_sync()
 
 
 def main():
+    session = cloud.check(APP_ID)
+    if session is None:
+        _without_cloud()
+        return
+    paths.configure(session.data_dir, session.local_dir)
+
     _set_app_id()
     _install_excepthook()
     enable_crash_log(app_data_dir())
@@ -76,10 +108,6 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(False)
-
-    if _setup_running():
-        QMessageBox.information(None, "업데이트 중", "새 버전을 설치하고 있어요.\n설치가 끝나면 프로그램이 저절로 다시 켜져요.")
-        return
 
     ok = acquire(APP_NAME, app_data_dir())
     if not ok:
@@ -94,16 +122,21 @@ def main():
         app.setWindowIcon(QIcon(str(ico)))
     app.setStyleSheet(build_stylesheet(ui_cache_dir()))
 
-    try:
-        sync_startup_path()
-    except Exception:
-        pass
+    if not session.dev:
+        # 예전에 따로 설치한 프로그램의 자동 실행은 지운다 (이제 통합 클라우드의 '함께 켜기')
+        try:
+            remove_legacy_autostart()
+        except Exception:
+            pass
+    if legacy_app_running():
+        from app.ui.dialogs import notify
+        notify(None, "예전 마고 타종이 켜져 있어요",
+               "따로 설치해서 쓰던 마고 타종이 아직 켜져 있어요.\n그대로 두면 종이 두 번 울려요.\n\n"
+               "작업 표시줄 오른쪽 트레이에서 예전 마고 타종 아이콘을\n오른쪽 클릭해 ‘종료’를 눌러 주세요.")
 
-    conn = connect()
-    init_schema(conn, read_schema())
-    seed_if_empty(conn)
+    conn, prefer_local = cloud_sync.open_database(read_schema(), ask_choice=_ask_first_sync)
 
-    win = MainWindow(conn, app)
+    win = MainWindow(conn, app, session, prefer_local)
     win.resize(1240, 800)
     win.show()
 

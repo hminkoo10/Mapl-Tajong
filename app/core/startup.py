@@ -1,64 +1,43 @@
-import sys
+"""예전에 따로 설치해 쓰던 프로그램의 흔적 정리.
+
+컴퓨터를 켜면 자동으로 실행하는 일은 이제 마고에듀 통합 클라우드의 '함께 켜기'가 한다.
+"""
+from PyQt6.QtCore import QLockFile
+
+from app.core.paths import APP_NAME, legacy_data_dir
 
 try:
     import winreg
 except ImportError:  # Windows 이외 환경(개발/테스트)
     winreg = None
 
-APP_NAME = "MaplTajong"
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 
-def is_supported():
-    return winreg is not None
-
-
-def is_startup_enabled():
+def remove_legacy_autostart():
+    """예전 설치 파일이 등록한 자동 실행(HKCU\\...\\Run 의 MaplTajong)을 지운다. 지웠으면 True."""
     if winreg is None:
         return False
-    try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_READ)
-        winreg.QueryValueEx(key, APP_NAME)
-        winreg.CloseKey(key)
-        return True
-    except FileNotFoundError:
-        return False
-
-
-def enable_startup():
-    if winreg is None:
-        return
-    exe_path = sys.executable
-    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE)
-    winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, f'"{exe_path}"')
-    winreg.CloseKey(key)
-
-
-def disable_startup():
-    if winreg is None:
-        return
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE)
-        winreg.DeleteValue(key, APP_NAME)
-        winreg.CloseKey(key)
-    except FileNotFoundError:
-        pass
-
-
-def sync_startup_path():
-    """설치 위치가 바뀌었으면(예: 예전 exe → 설치 버전) 자동 실행 경로를 지금 실행 파일로 맞춘다."""
-    if winreg is None or not getattr(sys, "frozen", False):
-        return
-    want = f'"{sys.executable}"'
-    try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE)
     except OSError:
-        return
+        return False
     try:
-        cur, _ = winreg.QueryValueEx(key, APP_NAME)
-        if str(cur).strip().strip('"').lower() != sys.executable.lower():
-            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, want)
-    except FileNotFoundError:
-        pass
+        winreg.DeleteValue(key, APP_NAME)
+        return True
+    except OSError:
+        return False
     finally:
         winreg.CloseKey(key)
+
+
+def legacy_app_running():
+    """예전에 따로 설치한 프로그램이 지금 켜져 있는지 (그 프로그램의 잠금 파일이 잡혀 있음)."""
+    p = legacy_data_dir() / f"{APP_NAME}.lock"
+    if not p.exists():
+        return False
+    lock = QLockFile(str(p))
+    if lock.tryLock(0):
+        lock.unlock()
+        return False
+    return lock.error() == QLockFile.LockError.LockFailedError

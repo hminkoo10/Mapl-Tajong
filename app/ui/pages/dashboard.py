@@ -218,8 +218,9 @@ class TodayList(TickingWidget):
                    QFontMetricsF(p.font()).elidedText(ev["name"], Qt.TextElideMode.ElideRight, tw))
         p.setPen(qc(C.grey400 if past else C.grey500))
         p.setFont(font(12.5))
+        sub = f"{ev['sound']} · {ev['device']}" if ev.get("device") else ev["sound"]
         p.drawText(QRectF(tx, r.top() + 28, tw, 18), Qt.AlignmentFlag.AlignVCenter,
-                   QFontMetricsF(p.font()).elidedText(ev["sound"], Qt.TextElideMode.ElideRight, tw))
+                   QFontMetricsF(p.font()).elidedText(sub, Qt.TextElideMode.ElideRight, tw))
         p.setPen(QColor(col))
         p.setFont(font(13, QFont.Weight.DemiBold))
         p.drawText(QRectF(w - lw - 16, r.top(), lw + 2, r.height()), Qt.AlignmentFlag.AlignVCenter, label)
@@ -258,6 +259,16 @@ class DashboardPage(QWidget):
         st.addWidget(self.state_label)
         head.addLayout(st)
         root.addLayout(head)
+
+        # 이 기기에서 종을 울리지 않을 때 늘 보이는 안내
+        self.ring_off = QLabel("이 컴퓨터에서는 종이 울리지 않아요. 시간표만 맞추고, ‘지금 울리기’는 종을 울리는 기기에서 울려요."
+                               "  (설정 → 이 기기에서 종 울리기)")
+        self.ring_off.setWordWrap(True)
+        self.ring_off.setStyleSheet(f"background: {C.warning_soft}; color: {C.grey800}; font-size: 14px; "
+                                    f"font-weight: 600; border-radius: 12px; padding: 10px 16px;")
+        self.ring_off.setHidden(self.sch.ring_enabled)
+        self._ringing = None
+        root.addWidget(self.ring_off)
 
         cols = QHBoxLayout()
         cols.setSpacing(16)
@@ -456,7 +467,7 @@ class DashboardPage(QWidget):
         if animate:
             self.timeline.replay()
         today = datetime.now().strftime("%Y-%m-%d")
-        self.stat_played.set_value(repo.count_played_on(self.conn, today))
+        self.stat_played.set_value(self.sch.played_count(today))
         self.stat_left.set_value(sum(1 for e in events if e["status"] in ("next", "upcoming")))
         self.pause_today.blockSignals(True)
         self.pause_today.setChecked(self.sch.is_paused_today(today))
@@ -496,12 +507,20 @@ class DashboardPage(QWidget):
             self.next_name.setText("예정된 종이 없어요")
             self.next_when.setText("시간표에서 일정을 추가해 보세요")
 
+        ringing = self.sch.ring_enabled
+        if ringing != self._ringing:
+            self._ringing = ringing
+            self.ring_off.setHidden(ringing)
+            self.t_ring.set_content(caption="기다리지 않고 바로 울려요" if ringing else "종을 울리는 기기에서 바로 울려요")
         if paused_day:
             self.state_label.setText("오늘은 쉬는 날")
             self.dot.set_color(C.grey400, pulse=False)
         elif self.sch.paused:
             self.state_label.setText("잠시 멈춤")
             self.dot.set_color(C.warning, pulse=False)
+        elif not ringing:
+            self.state_label.setText("이 컴퓨터는 종을 울리지 않음")
+            self.dot.set_color(C.grey400, pulse=False)
         elif ev:
             self.state_label.setText("자동 타종 중")
             self.dot.set_color(C.success, pulse=True)
@@ -529,6 +548,12 @@ class DashboardPage(QWidget):
         self.ctx.changed("schedules")
         if ev is None:
             self.ctx.toast("울릴 종이 없어요", "warning")
+            return
+        if not self.sch.ring_enabled:
+            # 이 기기에서는 울리지 않음 → 종을 울리는 기기에 부탁한다
+            if self.ctx.sync is not None:
+                self.ctx.sync.request_ring(schedule_id=ev.schedule_id)
+            self.ctx.toast(f"종을 울리는 기기에서 {ev.name} 종을 울려요", "bell", 4000)
             return
         date = ev.run_at.strftime("%Y-%m-%d")
         self.ctx.toast(f"{ev.name} 종을 미리 울렸어요", "bell", 6000, "되돌리기",
@@ -558,11 +583,11 @@ class DashboardPage(QWidget):
     def on_toggle_pause(self):
         if self.sch.paused:
             self.sch.resume()
-            self.sch.recompute_next()
             self.ctx.toast("자동 타종을 다시 시작했어요", "success")
         else:
             self.sch.pause()
             self.ctx.toast("자동 타종을 멈췄어요", "warning")
+        self.ctx.changed("state")
         self.tick()
 
     def on_pause_today(self, on):
@@ -576,6 +601,10 @@ class DashboardPage(QWidget):
             return
         s = repo.get_sound(self.conn, sid)
         if not s:
+            return
+        if not self.sch.ring_enabled and self.ctx.sync is not None:
+            self.ctx.sync.request_ring(sound_id=int(s["id"]))
+            self.ctx.toast(f"종을 울리는 기기에서 {s['name']} 종소리를 울려요", "bell", 4000)
             return
         try:
             self.ctx.player.play(str(sound_file_path(str(s["file_name"]))), float(s["volume"]), str(s["name"]))

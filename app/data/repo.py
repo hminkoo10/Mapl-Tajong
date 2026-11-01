@@ -241,6 +241,13 @@ def today_results(conn, date_yyyymmdd):
     return out
 
 
+def logs_on(conn, date_yyyymmdd):
+    """그날의 기록 (오래된 것부터)."""
+    return conn.execute("""
+        SELECT * FROM logs WHERE occurred_at >= ? AND occurred_at <= ? ORDER BY id ASC
+    """, (date_yyyymmdd + " 00:00:00", date_yyyymmdd + " 23:59:59")).fetchall()
+
+
 def count_played_on(conn, date_yyyymmdd):
     r = conn.execute("SELECT COUNT(*) FROM logs WHERE result='PLAYED' AND occurred_at >= ? AND occurred_at <= ?",
                      (date_yyyymmdd + " 00:00:00", date_yyyymmdd + " 23:59:59")).fetchone()
