@@ -136,6 +136,57 @@ class CloudModelTest {
     }
 
     @Test
+    fun ringAtIsWrittenOnlyWhenPresentAndSurvivesRoundTrips() {
+        val now = RingRequest("r1", 3, null, "2026-11-01T01:23:45Z", "dev-a", "원장님 폰", "2026-11-01T01:23:48.250Z")
+        val old = RingRequest("r2", null, 4, "2026-11-01T01:23:45Z", "dev-b", "교무실 PC")     // PC 2.2.3·안드로이드 2.2.4 까지가 넣은 것
+        assertEquals(listOf("id", "schedule_id", "sound_id", "at", "ring_at", "by", "by_name"), now.toMap().keys.toList())
+        assertEquals(listOf("id", "schedule_id", "sound_id", "at", "by", "by_name"), old.toMap().keys.toList())
+        assertEquals(now, RingRequest.from(Json.parse(Json.write(now.toMap())).jObj()))
+        assertNull(RingRequest.from(Json.parse(Json.write(old.toMap())).jObj())!!.ringAt)
+        assertNull(RingRequest.from(old.toMap() + ("ring_at" to ""))!!.ringAt)
+        // 울릴 때: ring_at, 없으면 at
+        assertEquals(Instant.parse("2026-11-01T01:23:48.250Z"), now.ringInstant)
+        assertEquals(Instant.parse("2026-11-01T01:23:45Z"), old.ringInstant)
+        // state.json 과 이 기기 동기화 상태(sync.json)를 거쳐도 그대로
+        val file = CloudModel.stateFile(false, emptyList(), listOf(now, old), LocalDate.parse("2026-11-01"), metaA)
+        assertEquals(listOf(now, old), CloudModel.parseState(Json.parse(Json.write(file)).jObj()!!).requests)
+        val st = CloudModel.SyncState().apply { requests = listOf(now, old) }
+        assertEquals(listOf(now, old), CloudModel.SyncState.from(Json.parse(Json.write(st.toMap(), 0)).jObj()).requests)
+    }
+
+    @Test
+    fun isoMsAlwaysHasThreeDigits() {
+        assertEquals("2026-11-01T01:23:48.250Z", CloudModel.isoMs(Instant.parse("2026-11-01T01:23:48.25Z")))
+        assertEquals("2026-11-01T01:23:48.000Z", CloudModel.isoMs(Instant.parse("2026-11-01T01:23:48Z")))
+        assertEquals("2026-11-01T01:23:48.007Z", CloudModel.isoMs(Instant.parse("2026-11-01T01:23:48.007999Z")))   // 밀리초 아래는 버림
+        assertEquals(Instant.parse("2026-11-01T01:23:48.250Z"), CloudModel.parseInstant(CloudModel.isoMs(Instant.parse("2026-11-01T01:23:48.250Z"))))
+        assertEquals(3000L, CloudModel.RING_DELAY_MS)
+    }
+
+    @Test
+    fun dueRequestsUseRingAtThenAt() {
+        val now = Instant.parse("2026-11-02T01:00:00Z")
+        fun r(id: String, at: String, ringAt: String?) = RingRequest(id, 1, null, at, "dev-b", "교무실 PC", ringAt)
+        val reqs = listOf(
+            r("soon", "2026-11-02T00:59:57Z", "2026-11-02T01:00:00.250Z"),
+            r("ring-in", "2026-11-02T00:57:00Z", "2026-11-02T00:58:00.000Z"),       // at 은 2분 넘게 지났지만 ring_at 은 정확히 2분 전
+            r("ring-too-far", "2026-11-02T01:00:00Z", "2026-11-02T01:02:00.001Z"),  // at 은 지금이지만 ring_at 이 2분 넘게 뒤
+            r("ring-too-old", "2026-11-02T00:59:00Z", "2026-11-02T00:57:59.999Z"),
+            r("old-version", "2026-11-02T00:58:10Z", null),                         // ring_at 없음 → at
+            r("old-version-too-old", "2026-11-02T00:57:00Z", null),
+        )
+        assertEquals(listOf("soon", "ring-in", "old-version"), CloudModel.dueRequests(reqs, emptySet(), now).map { it.id })
+    }
+
+    @Test
+    fun freshRequestsStillUseAt() {
+        val now = Instant.parse("2026-11-02T01:10:00Z")
+        val stale = RingRequest("a", 1, null, "2026-11-02T00:59:59Z", "d", "n", "2026-11-02T01:05:00.000Z")   // ring_at 은 10분 안이어도 at 이 지남
+        val fresh = RingRequest("b", 1, null, "2026-11-02T01:00:00Z", "d", "n", "2026-11-02T00:50:00.000Z")
+        assertEquals(listOf(fresh), CloudModel.freshRequests(listOf(stale, fresh), now))
+    }
+
+    @Test
     fun parseInstantFormats() {
         assertEquals(Instant.parse("2026-11-01T01:23:45Z"), CloudModel.parseInstant("2026-11-01T01:23:45Z"))
         assertEquals(Instant.parse("2026-11-01T01:23:45Z"), CloudModel.parseInstant("2026-11-01T10:23:45+09:00"))

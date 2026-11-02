@@ -110,27 +110,18 @@ object Scheduler {
         return ev
     }
 
-    /** 다음 종을 지금 울리고, 정해진 시각에는 울리지 않게 표시 */
-    fun ringNextNow(ctx: Context): NextEvent? {
-        val repo = Repo(ctx)
-        val ev = next(repo) ?: return null
-        BellService.ring(ctx, ev.scheduleId, forced = true)
-        repo.addOverride(ev.runAt.toLocalDate(), ev.scheduleId, FIRED, "forced")
-        Alarms.reschedule(ctx)
-        return ev
-    }
-
     /**
-     * 종을 울리지 않는 기기의 '다음 종 지금 울리기': 종을 울리는 기기에 요청을 보내고,
-     * 이 기기 화면에서도 다음 종으로 넘어가게 미리 울림으로 표시한다. 클라우드에 로그인하지 않았으면 null.
+     * 다음 종 지금 울리기: 클라우드에 요청을 넣어 3초 뒤 종을 울리는 모든 기기에서 함께 울리고 (이 기기도 울리면 이 기기에서도),
+     * 정해진 시각에는 울리지 않게 지금 미리 울림으로 표시한다 (종을 울리지 않는 기기도 화면이 다음 종으로 넘어가게).
+     * 되돌리기에 쓰게 요청도 함께 돌려준다. 다음 종이 없거나 클라우드에 로그인하지 않았으면 null.
      */
-    fun requestNext(ctx: Context): NextEvent? {
+    fun ringNextNow(ctx: Context): Pair<NextEvent, CloudModel.RingRequest>? {
         val repo = Repo(ctx)
         val ev = next(repo) ?: return null
-        if (!Cloud.requestRing(ev.scheduleId, null)) return null
+        val req = Cloud.ringNow(ev.scheduleId, null) ?: return null
         repo.addOverride(ev.runAt.toLocalDate(), ev.scheduleId, FIRED, "forced")
         Alarms.reschedule(ctx)
-        return ev
+        return ev to req
     }
 
     /** 그 일정이 다음에 울릴 날짜 (쉬는 날·건너뛰기·이미 울림은 넘긴다) */

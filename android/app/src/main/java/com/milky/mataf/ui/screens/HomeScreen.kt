@@ -117,19 +117,25 @@ fun HomeScreen() {
     val played = remember(version, minute) { repo.countPlayed(now.toLocalDate()) }
     val setName = remember(version) { repo.sets().firstOrNull { it.id == repo.activeSetId() }?.name ?: "" }
     val ringsHere = remember(version) { Cloud.ringsHere(repo) }
+    val account by Cloud.status.collectAsState()
     val wide = isWide()
 
     Page(16.dp) {
-        // 시계
+        // 시계 (시계 폭을 먼저 주고, 상태와 로그인한 계정은 남는 폭에 맞춘다)
         Row(verticalAlignment = Alignment.Bottom) {
-            Column(Modifier.weight(1f)) {
+            Column {
                 Text("${now.monthValue}월 ${now.dayOfMonth}일 ${TimeUtil.WEEK_KO[now.dayOfWeek.value - 1]}요일",
                     style = text(15, FontWeight.SemiBold, C.grey600))
                 RollingClock("%02d:%02d:%02d".format(now.hour, now.minute, now.second), if (wide) 52 else 44)
             }
-            StatusDot(if (paused) "잠시 멈춤" else if (pauseDay) "오늘은 쉬는 날" else if (!ringsHere) "다른 기기가 울려요"
-                else if (next != null) "자동 타종 중" else "대기 중",
-                if (paused || pauseDay) C.warning else if (!ringsHere) C.grey400 else if (next != null) C.success else C.grey400)
+            Column(Modifier.weight(1f).padding(start = 12.dp), horizontalAlignment = Alignment.End) {
+                StatusDot(if (paused) "잠시 멈춤" else if (pauseDay) "오늘은 쉬는 날" else if (!ringsHere) "다른 기기가 울려요"
+                    else if (next != null) "자동 타종 중" else "대기 중",
+                    if (paused || pauseDay) C.warning else if (!ringsHere) C.grey400 else if (next != null) C.success else C.grey400)
+                if (account.loggedIn) Text("로그인: ${account.name.ifBlank { account.username }} (${account.username})",
+                    style = text(13, color = C.grey500), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp))
+            }
         }
 
         if (!ringsHere) {
@@ -164,16 +170,20 @@ fun HomeScreen() {
                 NextCard(next, now, setName, today)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     ActionTile(Icons.Rounded.NotificationsActive, "다음 종 지금 울리기",
-                        if (ringsHere) "기다리지 않고 바로 울려요" else "종을 울리는 기기에 부탁해요",
+                        if (ringsHere) "모든 기기에서 함께 울려요" else "종을 울리는 기기에서 울려요",
                         Modifier.weight(1f), enabled = next != null) {
-                        if (ringsHere) {
-                            val ev = Scheduler.ringNextNow(ctx)
-                            if (ev != null) Toasts.show("${TimeUtil.ampm(ev.runAt.toLocalTime())} ${ev.name} 종을 지금 울렸어요", "success",
-                                "되돌리기") { BellService.stop(ctx); Scheduler.undo(ctx, ev.scheduleId, ev.runAt.toLocalDate(), Scheduler.FIRED) }
-                        } else {
-                            val ev = Scheduler.requestNext(ctx)
-                            if (ev != null) Toasts.show("${TimeUtil.ampm(ev.runAt.toLocalTime())} ${ev.name} 종을 울려 달라고 보냈어요", "success")
-                            else Toasts.show("클라우드에 로그인해야 다른 기기에 울려 달라고 할 수 있어요", "warning")
+                        val r = Scheduler.ringNextNow(ctx)
+                        if (r != null) {
+                            val (ev, req) = r
+                            val what = "${TimeUtil.ampm(ev.runAt.toLocalTime())} ${ev.name} 종을 3초 뒤"
+                            if (ringsHere) Toasts.show("$what 모든 기기에서 함께 울려요", "success", "되돌리기") {
+                                // 이 기기에서만 거둔다 (이미 요청을 받은 다른 기기는 울린다)
+                                BellService.cancelAt(ctx, req.id)
+                                BellService.stop(ctx)
+                                Scheduler.undo(ctx, ev.scheduleId, ev.runAt.toLocalDate(), Scheduler.FIRED)
+                            } else Toasts.show("$what 종을 울리는 기기에서 울려요", "success")
+                        } else if (!Cloud.isLoggedIn()) {
+                            Toasts.show("클라우드에 로그인해야 다른 기기에 울려 달라고 할 수 있어요", "warning")
                         }
                     }
                     ActionTile(Icons.Rounded.SkipNext, "다음 종 건너뛰기", "이번 한 번만 울리지 않아요", Modifier.weight(1f),
@@ -318,9 +328,10 @@ private fun ManualPlayCard(ringing: String?, ringsHere: Boolean) {
             Select(sounds.map { it.id to it.name }, chosen, { sel = it }, Modifier.weight(1f))
             Btn("울리기", {
                 chosen?.let { id ->
-                    if (ringsHere) BellService.playSound(ctx, id)
-                    else if (Cloud.requestRing(null, id)) Toasts.show("${sounds.firstOrNull { it.id == id }?.name ?: "종"}을(를) 울려 달라고 보냈어요", "success")
-                    else Toasts.show("클라우드에 로그인해야 다른 기기에 울려 달라고 할 수 있어요", "warning")
+                    val name = sounds.firstOrNull { it.id == id }?.name ?: "종"
+                    if (Cloud.ringNow(null, id) == null) Toasts.show("클라우드에 로그인해야 다른 기기에 울려 달라고 할 수 있어요", "warning")
+                    else Toasts.show(if (ringsHere) "${name}을(를) 3초 뒤 모든 기기에서 함께 울려요" else "${name}을(를) 3초 뒤 종을 울리는 기기에서 울려요",
+                        "success")
                 }
             }, style = BtnStyle.Primary, enabled = chosen != null)
             Btn("정지", { BellService.stop(ctx) }, icon = Icons.Rounded.Stop, enabled = ringing != null)

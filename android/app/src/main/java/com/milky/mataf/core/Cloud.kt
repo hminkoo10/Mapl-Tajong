@@ -496,26 +496,36 @@ object Cloud {
         if (!ringsHere(repo)) return
         val me = deviceId()
         for (r in CloudModel.dueRequests(st.requests.filter { it.by != me }, st.handled.keys, now)) {
+            // 받자마자 처리한 것으로 기억하고(미리 울림 표시도 바로), 소리는 울릴 때(ring_at, 없으면 at)에 낸다
             st.handled[r.id] = now.toEpochMilli()
             val detail = "forced · ${r.byName.ifBlank { "다른 기기" }}"
+            val at = (r.ringInstant ?: now).toEpochMilli()
             val sid = r.scheduleId
             if (sid != null) {
                 val s = repo.schedule(sid) ?: continue
                 Scheduler.nextDateOf(repo, s)?.let { repo.addOverride(it, s.id, Scheduler.FIRED, "forced") }
-                BellService.ringRemote(app, s.id, null, detail)
+                BellService.ringAt(app, at, r.id, s.id, null, detail)
                 Alarms.reschedule(app)
             } else {
                 val soundId = r.soundId ?: continue
                 if (repo.sound(soundId) == null) continue
-                BellService.ringRemote(app, null, soundId, detail)
+                BellService.ringAt(app, at, r.id, null, soundId, detail)
             }
         }
     }
 
-    /** 종을 울리지 않는 기기의 '지금 울리기': state.json 에 요청을 넣는다. 로그인하지 않았으면 false */
-    fun requestRing(scheduleId: Long?, soundId: Long?): Boolean {
-        if (token == null) return false
-        val req = CloudModel.RingRequest(UUID.randomUUID().toString(), scheduleId, soundId, CloudModel.iso(Instant.now()), deviceId(), deviceName())
+    /**
+     * '지금 울리기' (홈의 "다음 종 지금 울리기", "종소리 바로 울리기"): state.json 에 요청을 넣어 바로 올린다.
+     * 같은 계정에서 종을 울리는 모든 기기가 ring_at(누른 때에서 3초 뒤)에 함께 울리고, 이 기기도 울리면 그때 직접 울린다.
+     * 되돌리기에서 이 기기의 울림을 거둘 수 있게 요청을 돌려준다 (BellService.cancelAt). 로그인하지 않았으면 null.
+     */
+    fun ringNow(scheduleId: Long?, soundId: Long?): CloudModel.RingRequest? {
+        if (token == null) return null
+        val now = Instant.now()
+        val ringAt = now.plusMillis(CloudModel.RING_DELAY_MS)
+        val req = CloudModel.RingRequest(UUID.randomUUID().toString(), scheduleId, soundId, CloudModel.iso(now), deviceId(), deviceName(),
+            CloudModel.isoMs(ringAt))
+        if (ringsHere(Repo(app))) BellService.ringAt(app, ringAt.toEpochMilli(), req.id, scheduleId, soundId, null)
         scope.launch {
             lock.withLock {
                 val st = state()
@@ -524,7 +534,7 @@ object Cloud {
             }
             schedule(Work.STATE, 0)
         }
-        return true
+        return req
     }
 
     // ---------------------------------------------------------------- 올리기

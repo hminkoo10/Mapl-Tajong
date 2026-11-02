@@ -318,7 +318,7 @@ class DashboardPage(QWidget):
         # ---------------- 빠른 동작 ----------------
         grid = QGridLayout()
         grid.setSpacing(12)
-        self.t_ring = ActionTile("ring", "다음 종 지금 울리기", "기다리지 않고 바로 울려요")
+        self.t_ring = ActionTile("ring", "다음 종 지금 울리기", "모든 기기에서 함께 울려요")
         self.t_skip = ActionTile("skip", "다음 종 건너뛰기", "이번 한 번만 울리지 않아요")
         self.t_pause = ActionTile("pause", "잠시 멈추기", "자동 타종을 멈춰요")
         self.t_full = ActionTile("fullscreen", "전체화면 시계", "교실 화면에 크게 띄워요")
@@ -524,7 +524,7 @@ class DashboardPage(QWidget):
         if ringing != self._ringing:
             self._ringing = ringing
             self.ring_off.setHidden(ringing)
-            self.t_ring.set_content(caption="기다리지 않고 바로 울려요" if ringing else "종을 울리는 기기에서 바로 울려요")
+            self.t_ring.set_content(caption="모든 기기에서 함께 울려요" if ringing else "종을 울리는 기기에서 울려요")
         if paused_day:
             self.state_label.setText("오늘은 쉬는 날")
             self.dot.set_color(C.grey400, pulse=False)
@@ -557,18 +557,29 @@ class DashboardPage(QWidget):
             self.ctx.toast(f"{ev.name} 종을 울렸어요", "bell", 3000)
 
     def on_ring_next(self):
-        ev = self.sch.ring_next_now()
+        sync = self.ctx.sync
+        ev = self.sch.ring_next_now(ring=sync is None)   # 클라우드에 연결돼 있으면 표시만 하고 3초 뒤 함께 울린다
         self.ctx.changed("schedules")
         if ev is None:
             self.ctx.toast("울릴 종이 없어요", "warning")
             return
+        date = ev.run_at.strftime("%Y-%m-%d")
+        if sync is not None:
+            ringing = self.sch.ring_enabled
+            req = sync.request_ring(schedule_id=ev.schedule_id,
+                                    ring_here=(lambda: self.sch.ring_event(ev)) if ringing else None)
+            if not ringing:
+                self.ctx.toast(f"{ev.name} 종을 3초 뒤 종을 울리는 기기에서 울려요", "bell", 4000)
+                return
+
+            def undo():
+                sync.cancel_ring(req["id"])
+                self._undo(ev.schedule_id, date, "FIRED_ONCE")
+            self.ctx.toast(f"{ev.name} 종을 3초 뒤 모든 기기에서 함께 울려요", "bell", 6000, "되돌리기", undo)
+            return
         if not self.sch.ring_enabled:
-            # 이 기기에서는 울리지 않음 → 종을 울리는 기기에 부탁한다
-            if self.ctx.sync is not None:
-                self.ctx.sync.request_ring(schedule_id=ev.schedule_id)
             self.ctx.toast(f"종을 울리는 기기에서 {ev.name} 종을 울려요", "bell", 4000)
             return
-        date = ev.run_at.strftime("%Y-%m-%d")
         self.ctx.toast(f"{ev.name} 종을 미리 울렸어요", "bell", 6000, "되돌리기",
                        lambda: self._undo(ev.schedule_id, date, "FIRED_ONCE"))
 
@@ -615,10 +626,16 @@ class DashboardPage(QWidget):
         s = repo.get_sound(self.conn, sid)
         if not s:
             return
-        if not self.sch.ring_enabled and self.ctx.sync is not None:
-            self.ctx.sync.request_ring(sound_id=int(s["id"]))
-            self.ctx.toast(f"종을 울리는 기기에서 {s['name']} 종소리를 울려요", "bell", 4000)
+        if self.ctx.sync is not None:
+            # 종을 울리는 모든 기기가 3초 뒤 함께 울린다 (이 기기도 울리면 그때 직접)
+            ringing = self.sch.ring_enabled
+            self.ctx.sync.request_ring(sound_id=int(s["id"]), ring_here=(lambda: self._play(s)) if ringing else None)
+            self.ctx.toast(f"{s['name']} 종소리를 3초 뒤 모든 기기에서 함께 울려요" if ringing
+                           else f"{s['name']} 종소리를 3초 뒤 종을 울리는 기기에서 울려요", "bell", 4000)
             return
+        self._play(s)
+
+    def _play(self, s):
         try:
             self.ctx.player.play(str(sound_file_path(str(s["file_name"]))), float(s["volume"]), str(s["name"]))
             self.eq.set_active(True)

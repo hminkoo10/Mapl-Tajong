@@ -100,19 +100,20 @@ class Scheduler:
         self.recompute_next()
         return ev
 
-    def ring_next_now(self):
-        """다음 종을 지금 울린다. 이 기기에서 종을 울리지 않으면 울린 것으로 표시만 한다 (울리기 요청은 부르는 쪽에서)."""
+    def ring_next_now(self, ring=True):
+        """다음 종을 지금 울린다. 이 기기에서 종을 울리지 않거나 ring 이 False 면 울린 것으로 표시만 한다
+        (울리기 요청과 ring_at 에 울리기는 부르는 쪽에서)."""
         ev = self.next_event
         if not ev:
             return None
-        if self.ring_enabled:
+        if ring and self.ring_enabled:
             self._ring(ev, forced=True)
         repo.add_override(self.conn, self._date_of(ev), ev.schedule_id, "FIRED_ONCE", "forced")
         self.recompute_next()
         return ev
 
-    def ring_schedule_now(self, schedule_id, detail="forced"):
-        """다른 기기의 울리기 요청: 그 일정의 종을 지금 울리고, 다음 차례를 울린 것으로 표시한다."""
+    def mark_schedule_fired(self, schedule_id):
+        """다른 기기의 울리기 요청: 그 일정의 다음 차례를 바로 울린 것으로 표시한다 (소리는 ring_event 로 ring_at 에)."""
         rows = repo.get_schedules(self.conn, [schedule_id])
         if not rows:
             return None
@@ -121,10 +122,13 @@ class Scheduler:
         run_at = self._next_run_of(s, now) or now
         ev = NextEvent(int(s["id"]), str(s["name"]), run_at, str(s["sound_name"]), str(s["sound_file_name"]),
                        _volume_of(s))
-        self._ring(ev, forced=True, detail=detail)
         repo.add_override(self.conn, self._date_of(ev), ev.schedule_id, "FIRED_ONCE", "forced")
         self.recompute_next()
         return ev
+
+    def ring_event(self, ev, detail="forced"):
+        """울린 것으로 표시해 둔 종을 지금 울린다 (울리기 요청의 ring_at 에)."""
+        self._ring(ev, forced=True, detail=detail)
 
     @staticmethod
     def _next_run_of(s, now):

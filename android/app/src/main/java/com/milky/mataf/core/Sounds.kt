@@ -114,7 +114,14 @@ class BellPlayer(private val ctx: Context) {
 
     val positionMs: Int get() = try { mp?.currentPosition ?: 0 } catch (e: Exception) { 0 }
 
+    private var failed: ((String) -> Unit)? = null
+
     fun play(path: String, volume: Double, label: String, onDone: (() -> Unit)? = null, onError: ((String) -> Unit)? = null) {
+        if (prepare(path, volume, label, onDone, onError)) start()
+    }
+
+    /** 소리를 열어만 둔다 (start() 하면 곧바로 소리가 나게). 열지 못했으면 onError 를 부르고 false */
+    fun prepare(path: String, volume: Double, label: String, onDone: (() -> Unit)? = null, onError: ((String) -> Unit)? = null): Boolean {
         stop()
         this.label = label
         val p = MediaPlayer()
@@ -140,11 +147,24 @@ class BellPlayer(private val ctx: Context) {
             }
             p.setOnCompletionListener { stop(); onDone?.invoke() }
             p.setOnErrorListener { _, what, _ -> stop(); onError?.invoke("재생 오류 ($what)"); true }
-            p.start()
             mp = p
+            failed = onError
+            return true
         } catch (e: Exception) {
             try { p.release() } catch (_: Exception) {}
             onError?.invoke(e.message ?: "재생하지 못했어요")
+            return false
+        }
+    }
+
+    /** 열어 둔 소리를 낸다 */
+    fun start() {
+        val p = mp ?: return
+        try {
+            p.start()
+        } catch (e: Exception) {
+            stop()
+            failed?.invoke(e.message ?: "재생하지 못했어요")
         }
     }
 

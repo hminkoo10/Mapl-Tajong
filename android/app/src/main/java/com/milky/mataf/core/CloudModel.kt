@@ -8,6 +8,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 /**
@@ -28,6 +29,8 @@ object CloudModel {
     const val REQUEST_KEEP_MIN = 10L
     /** 울리는 기기는 지금 ±이 시간 안의 요청만 울린다 */
     const val REQUEST_WINDOW_SEC = 120L
+    /** '지금 울리기'는 누른 때에서 이만큼 뒤(ring_at)에 모든 기기가 함께 울린다 (요청이 다른 기기에 닿을 시간) */
+    const val RING_DELAY_MS = 3000L
     const val LOG_DAYS = 60L
     const val LOG_MAX = 5000
 
@@ -41,6 +44,7 @@ object CloudModel {
 
     private val DEFAULT_SOUND = Regex("^bell[1-8]\\.wav$")
     private val SAFE_FILE = Regex("^[^/\\\\:*?\"<>|\\x00-\\x1f]+$")
+    private val ISO_MS: DateTimeFormatter = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC)
 
     // ---------------------------------------------------------------- 공통
     fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
@@ -51,6 +55,9 @@ object CloudModel {
         linkedMapOf("device_id" to deviceId, "device_name" to deviceName, "at" to iso(at))
 
     fun iso(at: Instant): String = at.truncatedTo(ChronoUnit.SECONDS).toString()
+
+    /** 밀리초까지, 늘 세 자리 ('2026-11-01T01:23:48.250Z'). Instant.toString() 은 0 인 자리를 빼서 따로 만든다 */
+    fun isoMs(at: Instant): String = ISO_MS.format(at)
 
     /** UTC ISO 8601 ('Z' 또는 +09:00 같은 오프셋, 오프셋이 없으면 UTC 로 본다) */
     fun parseInstant(s: String?): Instant? {
@@ -128,10 +135,15 @@ object CloudModel {
         fun toMap(): Map<String, Any?> = linkedMapOf("date" to date, "schedule_id" to scheduleId, "action" to action, "note" to note)
     }
 
-    data class RingRequest(val id: String, val scheduleId: Long?, val soundId: Long?, val at: String, val by: String, val byName: String) {
+    /** at: 요청한 때(초까지), ringAt: 울릴 때(밀리초까지). 예전 버전(PC 2.2.3·안드로이드 2.2.4 까지)이 넣은 요청에는 ringAt 이 없다 */
+    data class RingRequest(val id: String, val scheduleId: Long?, val soundId: Long?, val at: String, val by: String, val byName: String,
+                           val ringAt: String? = null) {
         val instant: Instant? get() = parseInstant(at)
-        fun toMap(): Map<String, Any?> = linkedMapOf("id" to id, "schedule_id" to scheduleId, "sound_id" to soundId, "at" to at,
-            "by" to by, "by_name" to byName)
+        /** 울릴 때: ring_at, 없으면 at */
+        val ringInstant: Instant? get() = parseInstant(ringAt) ?: instant
+        /** ring_at 은 있을 때만 쓴다 (예전 버전이 쓴 요청의 내용이 바뀌지 않게) */
+        fun toMap(): Map<String, Any?> = linkedMapOf<String, Any?>("id" to id, "schedule_id" to scheduleId, "sound_id" to soundId, "at" to at)
+            .apply { if (ringAt != null) put("ring_at", ringAt); put("by", by); put("by_name", byName) }
 
         companion object {
             fun from(m: Map<String, Any?>?): RingRequest? {
@@ -140,7 +152,8 @@ object CloudModel {
                 val sched = m["schedule_id"].jLong()?.takeIf { it > 0 }
                 val sound = m["sound_id"].jLong()?.takeIf { it > 0 }
                 if (sched == null && sound == null) return null
-                return RingRequest(id, sched, sound, m["at"].jStr() ?: "", m["by"].jStr() ?: "", m["by_name"].jStr() ?: "")
+                return RingRequest(id, sched, sound, m["at"].jStr() ?: "", m["by"].jStr() ?: "", m["by_name"].jStr() ?: "",
+                    m["ring_at"].jStr()?.takeIf { it.isNotBlank() })
             }
         }
     }
@@ -189,12 +202,12 @@ object CloudModel {
         return State(paused, ov, req)
     }
 
-    /** 처음 보는 요청 중 시각이 지금 ±2분 안인 것 */
+    /** 처음 보는 요청 중 울릴 때(ring_at, 없으면 at)가 지금 ±2분 안인 것 */
     fun dueRequests(requests: List<RingRequest>, handled: Set<String>, now: Instant): List<RingRequest> =
         requests.filter { r ->
             if (r.id in handled) return@filter false
-            val at = r.instant ?: return@filter false
-            Math.abs(Duration.between(at, now).seconds) <= REQUEST_WINDOW_SEC
+            val at = r.ringInstant ?: return@filter false
+            Math.abs(Duration.between(at, now).toMillis()) <= REQUEST_WINDOW_SEC * 1000
         }.distinctBy { it.id }
 
     // ---------------------------------------------------------------- logs/<기기>.json

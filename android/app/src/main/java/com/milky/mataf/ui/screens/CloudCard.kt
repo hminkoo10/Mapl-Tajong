@@ -92,8 +92,8 @@ fun CloudCard() {
             modifier = Modifier.padding(bottom = 8.dp))
         Divider()
         ToggleRow("이 기기에서 종 울리기",
-            if (ring) "정해진 시각에 이 기기에서 울려요. 다른 기기에서 울려 달라고 하면 이 기기에서 울려요"
-            else "이 기기에서는 울리지 않아요. ‘지금 울리기’를 누르면 종을 울리는 기기에 부탁해요",
+            if (ring) "정해진 시각에 이 기기에서 울려요. 어느 기기에서든 ‘지금 울리기’를 누르면 함께 울려요"
+            else "이 기기에서는 울리지 않아요. ‘지금 울리기’를 누르면 종을 울리는 기기에서 울려요",
             ring, { on ->
                 ring = on
                 Cloud.setRingsHere(ctx, on)
