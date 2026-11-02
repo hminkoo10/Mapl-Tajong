@@ -24,7 +24,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from PyQt6.QtCore import QFileSystemWatcher, QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import QFileSystemWatcher, QObject, Qt, QTimer, pyqtSignal
 
 from app.core import backup
 from app.core.sound_files import copy_atomic, remove_leftover_tmp
@@ -42,7 +42,8 @@ SHARED_ACTIONS = ("SKIP_ONCE", "PAUSE_DAY")   # state.json 에 넣는 오늘만 
 LOG_DAYS = 60
 LOG_MAX = 5000
 REQUEST_KEEP_SEC = 10 * 60    # 쓸 때 이보다 오래된 울리기 요청은 지운다
-REQUEST_WINDOW_SEC = 2 * 60   # 지금 ±2분 안의 요청만 울린다
+REQUEST_WINDOW_SEC = 2 * 60   # 울릴 때가 지금 ±2분 안인 요청만 울린다
+RING_DELAY_SEC = 3            # 누른 때에서 3초 뒤(ring_at)에 모든 기기가 함께 울린다 (요청이 닿을 시간)
 HANDLED_KEEP_SEC = 24 * 60 * 60
 
 EXPORT_DELAY_MS = 1000        # 바꾼 뒤 1초쯤 모아서 쓴다
@@ -64,6 +65,12 @@ def utc_now():
 
 def utc_iso(dt=None):
     return (dt or utc_now()).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def utc_iso_ms(dt=None):
+    """밀리초까지 (울리기 요청의 ring_at)."""
+    dt = (dt or utc_now()).astimezone(timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
 
 
 def parse_utc(s):
@@ -359,8 +366,17 @@ def _clean_request(r):
         return None
     if sid is None and snd is None:
         return None
-    return {"id": rid, "schedule_id": sid, "sound_id": snd, "at": str(r.get("at")),
-            "by": str(r.get("by") or ""), "by_name": str(r.get("by_name") or "")}
+    req = {"id": rid, "schedule_id": sid, "sound_id": snd, "at": str(r.get("at"))}
+    if parse_utc(r.get("ring_at")) is not None:   # 예전 버전이 넣은 요청에는 없음 (없는 채로 둔다)
+        req["ring_at"] = str(r.get("ring_at"))
+    req["by"] = str(r.get("by") or "")
+    req["by_name"] = str(r.get("by_name") or "")
+    return req
+
+
+def _ring_time(r):
+    """요청을 울릴 때: ring_at, 없으면 at."""
+    return parse_utc(r.get("ring_at")) or parse_utc(r.get("at"))
 
 
 def _validated_state(doc, today):
@@ -627,6 +643,7 @@ class CloudSync(QObject):
         self._requests = []
         self._unsent = set()
         self._handled = self._load_handled()
+        self._pending = {}         # 요청 ID → (QTimer, 울리는 함수): ring_at 에 이 기기에서 울릴 것
         self._remote_logs = {}     # 파일 이름 → {"sig", "device_id", "name", "rows"}
         self._sounds_sig = None
         self.watcher = None
@@ -690,14 +707,19 @@ class CloudSync(QObject):
         if not self._logs_timer.isActive():
             self._logs_timer.start()
 
-    def request_ring(self, schedule_id=None, sound_id=None):
-        """이 기기에서 종을 울리지 않을 때 '지금 울리기': 종을 울리는 기기에 요청한다."""
+    def request_ring(self, schedule_id=None, sound_id=None, ring_here=None):
+        """'지금 울리기': 요청을 바로 써서 종을 울리는 모든 기기가 ring_at(누른 때 + 3초)에 함께 울린다.
+        이 기기도 울리면 ring_here 를 넘긴다 → ring_at 에 부른다 (cancel_ring 으로 취소)."""
+        now = utc_now()
         req = {"id": uuid.uuid4().hex, "schedule_id": None if schedule_id is None else int(schedule_id),
-               "sound_id": None if sound_id is None else int(sound_id), "at": utc_iso(),
+               "sound_id": None if sound_id is None else int(sound_id), "at": utc_iso(now),
+               "ring_at": utc_iso_ms(now + timedelta(seconds=RING_DELAY_SEC)),
                "by": self.device_id, "by_name": self.device_name}
         self._requests.append(req)
         self._unsent.add(req["id"])
-        self._export_timer.start()
+        self._export("state")   # 1초 모으지 않고 바로 쓴다
+        if ring_here is not None:
+            self._ring_later(req["id"], parse_utc(req["ring_at"]), ring_here)
         return req
 
     def export_now(self):
@@ -819,8 +841,8 @@ class CloudSync(QObject):
         self._synced[kind] = content_key(build_state(self.conn, requests))
         if self.scheduler is not None:
             self.scheduler.paused = paused
+        self.handle_requests()   # 시간표 요청은 여기서 바로 '울림'으로 표시 → 아래에서 화면도 맞춘다
         self.remote_applied.emit("state")
-        self.handle_requests()
         return True
 
     def _on_fs(self, _path=""):
@@ -945,7 +967,8 @@ class CloudSync(QObject):
         repo.set_setting(self.conn, "ring_handled", json.dumps(keep))
 
     def handle_requests(self):
-        """종을 울리는 기기: 처음 보는 요청 중 지금 ±2분 안의 것만 한 번 울린다."""
+        """종을 울리는 기기: 처음 보는 요청 중 울릴 때(ring_at, 없으면 at)가 지금 ±2분 안인 것만 한 번 울린다.
+        받자마자 기억하고(시간표 요청이면 FIRED_ONCE 도 바로), 소리는 울릴 때 낸다 (이미 지났으면 바로)."""
         sch = self.scheduler
         if sch is None or not sch.ring_enabled:
             return 0
@@ -954,27 +977,65 @@ class CloudSync(QObject):
         for r in self._requests:
             if r["id"] in self._handled or r["by"] == self.device_id:
                 continue
-            at = parse_utc(r["at"])
+            at = _ring_time(r)
             if at is None or abs((now - at).total_seconds()) > REQUEST_WINDOW_SEC:
                 continue
             self._handled[r["id"]] = r["at"]
-            todo.append(r)
+            todo.append((r, at))
         if not todo:
             return 0
-        self._save_handled()   # 울리다 꺼져도 다시 울리지 않게 먼저 기억
-        for r in todo:
+        self._save_handled()   # 울리기 전에 꺼져도 다시 울리지 않게 먼저 기억
+        for r, at in todo:
             who = r["by_name"] or "다른 기기"
             if r["schedule_id"] is not None:
-                ev = sch.ring_schedule_now(r["schedule_id"], detail=f"forced · {who}")
+                ev = sch.mark_schedule_fired(r["schedule_id"])   # 제 시각 종과 겹쳐도 두 번 울리지 않게 바로
                 if ev is not None:
-                    self.notice.emit(f"{who}에서 요청해서 {ev.name} 종을 울렸어요", "bell")
+                    self._ring_later(r["id"], at, lambda ev=ev, who=who: self._ring_schedule(ev, who))
             else:
-                s = repo.get_sound(self.conn, r["sound_id"])
-                if s is None:
-                    continue
-                try:
-                    sch.player.play(str(sound_file_path(str(s["file_name"]))), float(s["volume"]), str(s["name"]))
-                    self.notice.emit(f"{who}에서 요청해서 {s['name']} 종소리를 울렸어요", "bell")
-                except Exception as e:
-                    self.notice.emit(f"{who}의 요청을 울리지 못했어요: {e}", "error")
+                self._ring_later(r["id"], at, lambda r=r, who=who: self._ring_sound(r["sound_id"], who))
         return len(todo)
+
+    def _ring_schedule(self, ev, who):
+        self.scheduler.ring_event(ev, detail=f"forced · {who}")
+        self.notice.emit(f"{who}에서 요청해서 {ev.name} 종을 울렸어요", "bell")
+
+    def _ring_sound(self, sound_id, who):
+        s = repo.get_sound(self.conn, sound_id)
+        if s is None:
+            return
+        try:
+            self.scheduler.player.play(str(sound_file_path(str(s["file_name"]))), float(s["volume"]), str(s["name"]))
+            self.notice.emit(f"{who}에서 요청해서 {s['name']} 종소리를 울렸어요", "bell")
+        except Exception as e:
+            self.notice.emit(f"{who}의 요청을 울리지 못했어요: {e}", "error")
+
+    def _ring_later(self, req_id, at, fn):
+        """at 에 이 기기에서 fn() 을 부른다 (이미 지났으면 바로). cancel_ring(req_id) 로 취소한다."""
+        ms = int((at - utc_now()).total_seconds() * 1000)
+        if ms <= 0:
+            fn()
+            return
+        t = QTimer(self)
+        t.setSingleShot(True)
+        t.setTimerType(Qt.TimerType.PreciseTimer)
+        t.timeout.connect(lambda: self._ring_due(req_id))
+        self._pending[req_id] = (t, fn)
+        t.start(ms)
+
+    def _ring_due(self, req_id):
+        t, fn = self._pending.pop(req_id, (None, None))
+        if t is None:
+            return
+        t.deleteLater()
+        if self.scheduler is not None and not self.scheduler.ring_enabled:
+            return   # 그 사이 이 기기에서 종을 울리지 않게 바꿈
+        fn()
+
+    def cancel_ring(self, req_id):
+        """ring_at 전이면 이 기기에서는 울리지 않게 한다 (되돌리기). 요청은 그대로라 받은 다른 기기는 울린다."""
+        t, _ = self._pending.pop(req_id, (None, None))
+        if t is None:
+            return False
+        t.stop()
+        t.deleteLater()
+        return True

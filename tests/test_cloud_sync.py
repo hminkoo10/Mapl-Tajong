@@ -11,10 +11,12 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -38,9 +40,11 @@ def setUpModule():
 class FakePlayer:
     def __init__(self):
         self.played = []
+        self.times = []    # 울린 때 (UTC)
 
     def play(self, path, volume, name=""):
         self.played.append((Path(path).name, volume, name))
+        self.times.append(datetime.now(timezone.utc))
 
     def is_playing(self):
         return False
@@ -77,6 +81,14 @@ def today():
 def overrides(conn):
     return sorted((r[0], int(r[1]), r[2]) for r in
                   conn.execute("SELECT date_yyyymmdd, schedule_id, action FROM overrides").fetchall())
+
+
+def pump(sec):
+    """sec 초 동안 Qt 이벤트를 돌린다 (ring_at 타이머가 울리게)."""
+    end = time.monotonic() + sec
+    while time.monotonic() < end:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
 
 
 class Device:
@@ -326,6 +338,168 @@ class RingTests(Base):
         self.assertEqual(a.player.played, [])
         self.assertTrue(repo.has_override(a.conn, ev.run_at.strftime("%Y-%m-%d"), ev.schedule_id, "FIRED_ONCE"))
 
+        # 종을 울리는 기기도 ring=False 면 표시만 한다 (소리는 ring_at 에 따로)
+        a.sch.set_ring_enabled(True)
+        ev2 = a.sch.ring_next_now(ring=False)
+        self.assertIsNotNone(ev2)
+        self.assertEqual(a.player.played, [])
+        self.assertTrue(repo.has_override(a.conn, ev2.run_at.strftime("%Y-%m-%d"), ev2.schedule_id, "FIRED_ONCE"))
+
+    def test_request_written_at_once_with_ring_at(self):
+        a = Device(self.data, "devA", "A")
+        fill_sample(a.conn)
+        a.start()
+        before = datetime.now(timezone.utc)
+        req = a.sync.request_ring(sound_id=5)
+        after = datetime.now(timezone.utc)
+        reqs = self.read("state.json")["ring_requests"]   # 1초 모으지 않고 바로 씀
+        self.assertEqual([r["id"] for r in reqs], [req["id"]])
+        r = reqs[0]
+        self.assertEqual((r["schedule_id"], r["sound_id"], r["by"], r["by_name"]), (None, 5, "devA", "A"))
+        self.assertRegex(r["at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+        self.assertRegex(r["ring_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
+        self.assertEqual(cloud_sync.RING_DELAY_SEC, 3)
+        delay = timedelta(seconds=cloud_sync.RING_DELAY_SEC)
+        ring_at = cloud_sync.parse_utc(r["ring_at"])
+        self.assertGreaterEqual(ring_at, before + delay - timedelta(milliseconds=1))   # 밀리초 아래는 버림
+        self.assertLessEqual(ring_at, after + delay)
+        # 다시 읽어도 ring_at 을 그대로 두어 다시 쓰지 않는다
+        a.sync._seen.pop("state")
+        a.sync._sig.clear()
+        a.sync.check_files()
+        self.assertEqual(a.sync._requests[0]["ring_at"], r["ring_at"])
+        self.assertFalse(a.sync._export("state"))
+
+    def test_ringing_presser_rings_at_ring_at_once(self):
+        a = Device(self.data, "devA", "A")
+        fill_sample(a.conn)
+        a.start()
+        a.sch.recompute_next()
+        with mock.patch.object(cloud_sync, "RING_DELAY_SEC", 0.3):
+            ev = a.sch.ring_next_now(ring=False)   # 홈의 '다음 종 지금 울리기'처럼
+            req = a.sync.request_ring(schedule_id=ev.schedule_id, ring_here=lambda: a.sch.ring_event(ev))
+        ring_at = cloud_sync.parse_utc(req["ring_at"])
+        self.assertTrue(repo.has_override(a.conn, ev.run_at.strftime("%Y-%m-%d"), ev.schedule_id, "FIRED_ONCE"))
+        self.assertEqual(a.player.played, [])
+        pump(0.1)
+        self.assertEqual(a.player.played, [])     # ring_at 전에는 울리지 않음
+        pump(0.5)
+        self.assertEqual(len(a.player.played), 1)
+        self.assertGreaterEqual(a.player.times[0], ring_at - timedelta(milliseconds=20))
+        log = a.conn.execute("SELECT schedule_id, result, detail FROM logs").fetchall()
+        self.assertEqual([tuple(r) for r in log], [(ev.schedule_id, "PLAYED", "forced")])
+
+        # 자기 요청은 다시 읽어도 울리지 않는다
+        a.sync._seen.pop("state")
+        a.sync._sig.clear()
+        a.sync.check_files()
+        a.sync.handle_requests()
+        pump(0.1)
+        self.assertEqual(len(a.player.played), 1)
+        self.assertFalse(a.sync.cancel_ring(req["id"]))   # 이미 울림
+
+    def test_other_device_marks_at_once_and_plays_at_ring_at(self):
+        a = Device(self.data, "devA", "원장님 PC")
+        fill_sample(a.conn)
+        a.start()
+        a.sch.set_ring_enabled(False)
+        b = Device(self.data, "devB", "강의실 PC").start()
+        notices = []
+        b.sync.notice.connect(lambda t, k: notices.append(t))
+        with mock.patch.object(cloud_sync, "RING_DELAY_SEC", 0.3):
+            req = a.sync.request_ring(schedule_id=9)
+        ring_at = cloud_sync.parse_utc(req["ring_at"])
+
+        b.sync.check_files()
+        # 받자마자 기억하고 FIRED_ONCE(forced) 를 남긴다. 소리는 아직
+        self.assertTrue(b.conn.execute(
+            "SELECT 1 FROM overrides WHERE schedule_id=9 AND action='FIRED_ONCE' AND note='forced'").fetchone())
+        self.assertIn(req["id"], json.loads(repo.get_setting(b.conn, "ring_handled")))
+        self.assertEqual(b.player.played, [])
+        self.assertEqual(b.conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0], 0)
+        self.assertEqual(notices, [])
+
+        pump(0.6)
+        self.assertEqual([p[0] for p in b.player.played], ["rest.wav"])
+        self.assertGreaterEqual(b.player.times[0], ring_at - timedelta(milliseconds=20))
+        log = b.conn.execute("SELECT schedule_id, result, detail FROM logs").fetchall()
+        self.assertEqual([tuple(r) for r in log], [(9, "PLAYED", "forced · 원장님 PC")])
+        self.assertEqual(notices, ["원장님 PC에서 요청해서 2교시 종을 울렸어요"])
+        self.assertEqual(a.player.played, [])
+
+    def test_request_without_ring_at_plays_at_once(self):
+        b = Device(self.data, "devB", "B")
+        fill_sample(b.conn)
+        b.start()
+        st = self.read("state.json")
+        st["ring_requests"] = [{"id": "old-version", "schedule_id": 7, "sound_id": None,
+                                "at": cloud_sync.utc_iso(datetime.now(timezone.utc) - timedelta(seconds=2)),
+                                "by": "phone", "by_name": "원장님 폰"}]
+        self.write("state.json", st)
+        b.sync.check_files()
+        self.assertEqual([p[0] for p in b.player.played], ["bell1.wav"])   # 기다리지 않고 바로
+        self.assertNotIn("ring_at", b.sync._requests[0])
+        self.assertFalse(b.sync._export("state"))   # ring_at 을 만들어 넣어 다시 쓰지 않는다
+
+    def test_ring_time_outside_window_ignored(self):
+        b = Device(self.data, "devB", "B")
+        fill_sample(b.conn)
+        b.start()
+        now = datetime.now(timezone.utc)
+        st = self.read("state.json")
+        st["ring_requests"] = [   # at 은 지금이어도 ring_at 이 ±2분 밖이면 울리지 않는다
+            {"id": "later", "schedule_id": 7, "sound_id": None, "at": cloud_sync.utc_iso(now),
+             "ring_at": cloud_sync.utc_iso_ms(now + timedelta(minutes=3)), "by": "phone", "by_name": "폰"},
+            {"id": "earlier", "schedule_id": None, "sound_id": 5, "at": cloud_sync.utc_iso(now),
+             "ring_at": cloud_sync.utc_iso_ms(now - timedelta(minutes=3)), "by": "phone", "by_name": "폰"},
+        ]
+        self.write("state.json", st)
+        b.sync.check_files()
+        pump(0.1)
+        self.assertEqual(b.player.played, [])
+        self.assertEqual(b.sync._pending, {})
+        self.assertEqual(b.sync._handled, {})
+        self.assertEqual(overrides(b.conn), [])
+
+    def test_cancel_before_ring_at(self):
+        a = Device(self.data, "devA", "A")
+        fill_sample(a.conn)
+        a.start()
+        b = Device(self.data, "devB", "B").start()
+        a.sch.recompute_next()
+        with mock.patch.object(cloud_sync, "RING_DELAY_SEC", 0.3):
+            ev = a.sch.ring_next_now(ring=False)
+            req = a.sync.request_ring(schedule_id=ev.schedule_id, ring_here=lambda: a.sch.ring_event(ev))
+        b.sync.check_files()                          # B 는 이미 받음
+        self.assertTrue(a.sync.cancel_ring(req["id"]))   # 되돌리기
+        self.assertFalse(a.sync.cancel_ring(req["id"]))
+        pump(0.6)
+        self.assertEqual(a.player.played, [])
+        self.assertEqual(a.conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0], 0)
+        self.assertEqual(len(b.player.played), 1)    # 받은 다른 기기는 그대로 울린다
+
+    def test_not_ringing_device_does_not_play(self):
+        a = Device(self.data, "devA", "A")
+        fill_sample(a.conn)
+        a.start()
+        a.sch.set_ring_enabled(False)
+        c = Device(self.data, "devC", "C")
+        c.sch.set_ring_enabled(False)
+        c.start()
+        b = Device(self.data, "devB", "B").start()
+        with mock.patch.object(cloud_sync, "RING_DELAY_SEC", 0.3):
+            a.sync.request_ring(schedule_id=9)
+        c.sync.check_files()
+        b.sync.check_files()
+        b.sch.set_ring_enabled(False)                 # ring_at 전에 이 기기에서 종 울리기를 끔
+        pump(0.6)
+        self.assertEqual(a.player.played, [])
+        self.assertEqual(c.player.played, [])
+        self.assertEqual(c.sync._handled, {})
+        self.assertEqual(overrides(c.conn), [])
+        self.assertEqual(b.player.played, [])
+        self.assertEqual(b.conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0], 0)
+
     def test_ring_request_handled_once_and_expired_ignored(self):
         a = Device(self.data, "devA", "원장님 PC")
         fill_sample(a.conn)
@@ -334,8 +508,8 @@ class RingTests(Base):
         b = Device(self.data, "devB", "강의실 PC").start()
         self.assertTrue(b.sch.ring_enabled)
 
-        req = a.sync.request_ring(schedule_id=9)
-        a.sync.export_now()
+        with mock.patch.object(cloud_sync, "RING_DELAY_SEC", 0):   # 받았을 때 이미 울릴 때가 된 요청
+            req = a.sync.request_ring(schedule_id=9)
         self.assertEqual([r["id"] for r in self.read("state.json")["ring_requests"]], [req["id"]])
         self.assertEqual(a.player.played, [])
 
@@ -388,20 +562,24 @@ class RingTests(Base):
         b = Device(self.data, "devB", "B").start()
         b.sch.recompute_next()
         b.sch.skip_next_once()
-        b.sync.export_now()                     # 그 사이 B 가 state.json 을 바꿈
-        req = a.sync.request_ring(sound_id=5)   # A 는 아직 보내지 않은 요청이 있음
-        a.sync.check_files()
-        a.sync.export_now()
-        ids = [r["id"] for r in self.read("state.json")["ring_requests"]]
-        self.assertEqual(ids, [req["id"]])
-        self.assertTrue(self.read("state.json")["overrides"])   # B 의 건너뛰기도 그대로
+        b.sync.export_now()                     # 그 사이 B 가 state.json 을 바꿈 (A 는 아직 못 읽음)
+        req = a.sync.request_ring(sound_id=5)   # 바로 쓰기 전에 B 것을 먼저 적용하고, 보내지 않은 요청은 그대로
+        st = self.read("state.json")
+        self.assertEqual([r["id"] for r in st["ring_requests"]], [req["id"]])
+        self.assertTrue(st["overrides"])        # B 의 건너뛰기도 그대로
+        self.assertEqual(st["meta"]["device_id"], "devA")
 
     def test_old_requests_pruned_when_writing(self):
         a = Device(self.data, "devA", "A")
         fill_sample(a.conn)
         a.start()
-        old = cloud_sync.utc_iso(datetime.now(timezone.utc) - timedelta(minutes=11))
-        a.sync._requests = [{"id": "x", "schedule_id": 7, "sound_id": None, "at": old, "by": "p", "by_name": "p"}]
+        now = datetime.now(timezone.utc)
+        old = cloud_sync.utc_iso(now - timedelta(minutes=11))
+        a.sync._requests = [   # 지우는 기준은 ring_at 이 아니라 at
+            {"id": "x", "schedule_id": 7, "sound_id": None, "at": old, "ring_at": cloud_sync.utc_iso_ms(now),
+             "by": "p", "by_name": "p"},
+            {"id": "y", "schedule_id": None, "sound_id": 5, "at": old, "by": "p", "by_name": "p"},
+        ]
         a.sch.pause()
         a.sync.export_now()
         self.assertEqual(self.read("state.json")["ring_requests"], [])
