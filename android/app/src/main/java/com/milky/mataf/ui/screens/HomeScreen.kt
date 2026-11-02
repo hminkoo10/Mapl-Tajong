@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CloudQueue
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Pause
@@ -53,10 +52,12 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.milky.mataf.FullscreenActivity
+import com.milky.mataf.R
 import com.milky.mataf.core.Alarms
 import com.milky.mataf.core.AppEvents
 import com.milky.mataf.core.BellService
@@ -134,7 +135,7 @@ fun HomeScreen() {
         if (!ringsHere) {
             Card(padding = 16.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.CloudQueue, null, tint = C.accent)
+                    Icon(painterResource(R.drawable.cloud_mark), null, Modifier.size(24.dp), tint = C.accent)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text("이 기기에서는 종을 울리지 않아요", style = text(14, FontWeight.SemiBold))

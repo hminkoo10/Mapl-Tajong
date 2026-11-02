@@ -70,7 +70,7 @@ def write_version_info(version):
 
 
 def windows_icon():
-    """app.ico 가 사실 PNG 그림이라 Windows exe/설치 파일 아이콘으로 쓸 수 있게 진짜 ICO로 바꾼다 (그림은 그대로)."""
+    """exe/설치 파일 아이콘. app.ico 는 tools/build_icons.py 가 만든 진짜 ICO(16~256)라 그대로 쓰고, PNG 그림이면 ICO로 바꾼다."""
     src = ROOT / "app" / "assets" / "ui" / "app.ico"
     if src.read_bytes()[:4] == b"\x00\x00\x01\x00":
         return src

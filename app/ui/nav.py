@@ -112,7 +112,7 @@ class _NavList(QWidget):
 
 
 class _Logo(QWidget):
-    """기존 버전의 앱 아이콘(app.ico)을 그대로 사용."""
+    """앱 아이콘(app.ico, 크기별 그림이 든 ICO)을 그대로 사용."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
