@@ -257,7 +257,20 @@ class DashboardPage(QWidget):
         self.state_label = QLabel("")
         self.state_label.setStyleSheet(f"color: {C.grey700}; font-size: 14px; font-weight: 600;")
         st.addWidget(self.state_label)
-        head.addLayout(st)
+        st.insertStretch(0, 1)  # 오른쪽 맞춤
+        hr = QVBoxLayout()
+        hr.setSpacing(6)
+        hr.addStretch(1)
+        hr.addLayout(st)
+        # 어느 통합 클라우드 아이디로 켜졌는지
+        user = ctx.session.user if ctx.session is not None else None
+        if user:
+            username = user.get("username") or ""
+            self.account_label = QLabel(f"로그인: {user.get('name') or username} ({username})")
+            self.account_label.setStyleSheet(f"color: {C.grey500}; font-size: 13px;")
+            self.account_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+            hr.addWidget(self.account_label)
+        head.addLayout(hr)
         root.addLayout(head)
 
         # 이 기기에서 종을 울리지 않을 때 늘 보이는 안내
