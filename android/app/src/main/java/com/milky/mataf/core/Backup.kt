@@ -34,7 +34,6 @@ object Backup {
     private const val FORMAT = 1
     private const val APP = "MaplTajong"
     private const val NOT_BACKUP = "타종 프로그램 백업 파일이 아닙니다."
-    private const val TOO_NEW = "더 최신 버전에서 만든 백업입니다. 프로그램을 업데이트해 주세요."
     private const val TAMPERED = "이 백업 파일은 프로그램 밖에서 바뀌었거나 예전 형식이라 불러올 수 없어요."
 
     /** 옮기는 표와 열 (넣는 순서도 데스크톱과 같다: 종소리 → 세트 → 일정) */
@@ -134,7 +133,9 @@ object Backup {
                 parseManifest(try { z.text("manifest.json") } catch (e: Exception) { null })
                 val raw = try { z.bytes("data.json")!! } catch (e: Exception) { throw BackupError(NOT_BACKUP) }
                 Cloud.signingKey()?.let { checkSig(raw, it) }
-                val d = try { JSONObject(String(raw, Charsets.UTF_8)) } catch (e: Exception) { throw BackupError(NOT_BACKUP) }
+                val parsed = try { Json.parse(String(raw, Charsets.UTF_8)).jObj() ?: throw IllegalArgumentException() }
+                    catch (e: Exception) { throw BackupError(NOT_BACKUP) }
+                val d = JSONObject(CloudModel.sanitizeTables(parsed))
                 beforeReplaceFiles()
                 val sounds = d.optJSONArray("sounds") ?: JSONArray()
                 for (i in 0 until sounds.length()) {
@@ -187,17 +188,13 @@ object Backup {
         return rows.size
     }
 
-    private fun parseManifest(text: String?): Manifest {
-        val m = try { JSONObject(text!!) } catch (e: Exception) { throw BackupError(NOT_BACKUP) }
-        if (m.opt("app") != APP) throw BackupError(NOT_BACKUP)
-        val format = when (val f = m.opt("format") ?: 0) {
-            is Number -> f.toInt()
-            else -> f.toString().trim().toIntOrNull() ?: throw BackupError(NOT_BACKUP)
-        }
-        if (format > FORMAT) throw BackupError(TOO_NEW)
-        val counts = m.optJSONObject("counts")
-        return Manifest(format, m.optString("app_version", ""), m.optString("created_at", ""),
-            counts?.keys()?.asSequence()?.associateWith { counts.optInt(it) } ?: emptyMap())
+    internal fun parseManifest(text: String?): Manifest {
+        val m = try { Json.parse(text!!).jObj() ?: throw IllegalArgumentException() }
+            catch (e: Exception) { throw BackupError(NOT_BACKUP) }
+        val safe = try { CloudModel.sanitizeManifest(m) }
+            catch (e: IllegalArgumentException) { throw BackupError(e.message ?: NOT_BACKUP) }
+        return Manifest(FORMAT, safe["app_version"] as String, safe["created_at"] as String,
+            safe["counts"].jObj()!!.mapValues { (_, v) -> (v as Number).toInt() })
     }
 
     /** 표 내용을 한 번에 바꾼다 (중간에 실패하면 전부 되돌린다) */

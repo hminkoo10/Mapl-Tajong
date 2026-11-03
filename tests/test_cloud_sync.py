@@ -240,10 +240,10 @@ class ConfigTests(Base):
         self.assertEqual(len(repo.list_schedules(b.conn, 3)), 2)
         doc = json.loads(good)
         doc["schedules"] = doc["schedules"][:1]
-        doc["schedules"][0]["sound_id"] = 999     # 없는 종소리 → 통째로 적용하지 않음
+        doc["schedules"][0]["sound_id"] = 999     # 없는 종소리 항목만 제거
         self.write("config.json", doc)
         b.sync.check_files()
-        self.assertEqual(len(repo.list_schedules(b.conn, 3)), 2)
+        self.assertEqual(len(repo.list_schedules(b.conn, 3)), 0)
         doc["schedules"][0]["sound_id"] = 5
         self.write("config.json", doc)
         b.sync.check_files()
