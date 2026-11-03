@@ -131,7 +131,7 @@ def read_json_bytes(path):
     except OSError as e:
         raise ValueError(str(e))
     try:
-        return json.loads(raw.decode("utf-8-sig")), raw
+        return json.loads(raw.decode("utf-8-sig"), parse_int=backup._json_int), raw
     except Exception as e:
         raise ValueError(f"JSON 이 아니에요: {e}")
 
@@ -230,58 +230,11 @@ def _opt_int(v):
     return None if v is None else _int(v)
 
 
-def _float(v):
-    if isinstance(v, bool) or v is None:
-        raise ValueError(f"숫자가 아니에요: {v!r}")
-    return float(v)
-
-
-def _opt_float(v):
-    return None if v is None else _float(v)
-
-
-def _text(v):
-    if v is None or isinstance(v, (dict, list)):
-        raise ValueError(f"글자가 아니에요: {v!r}")
-    return str(v)
-
-
-def _file_name(v):
-    name = Path(_text(v)).name   # 경로 조작 방지
-    if not name or name in (".", ".."):
-        raise ValueError(f"파일 이름이 올바르지 않아요: {v!r}")
-    return name
-
-
-def _hhmm(v):
-    m = re.fullmatch(r"(\d{1,2}):(\d{2})", _text(v).strip())
-    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
-        raise ValueError(f"시각이 올바르지 않아요: {v!r}")
-    return f"{int(m.group(1)):02d}:{m.group(2)}"
-
-
-def _bool_int(v):
-    return 1 if (v is True or (not isinstance(v, bool) and _int(v) != 0)) else 0
-
-
-# 표마다: 열 → (바꾸는 함수, 꼭 있어야 하는지)
-_COLUMNS = {
-    "sounds": {"id": (_int, True), "name": (_text, True), "file_name": (_file_name, True),
-               "volume": (_float, False), "created_at": (_text, False)},
-    "schedule_sets": {"id": (_int, True), "name": (_text, True), "created_at": (_text, False)},
-    "schedules": {"id": (_int, True), "set_id": (_opt_int, False), "name": (_text, True),
-                  "weekday_mask": (_int, True), "time_hhmm": (_hhmm, True), "sound_id": (_int, True),
-                  "volume_override": (_opt_float, False), "enabled": (_bool_int, False),
-                  "sort_order": (_int, False), "created_at": (_text, False), "updated_at": (_text, False)},
-}
-
-
 def _check_head(doc, kind):
     if not isinstance(doc, dict) or doc.get("app") != APP or doc.get("kind") != kind:
         raise ValueError(f"{kind} 파일이 아니에요")
-    try:
-        fmt = _int(doc.get("format", 1))
-    except ValueError:
+    fmt = backup._clean_int(doc.get("format", FORMAT))
+    if fmt is None or fmt < 1:
         raise ValueError("format 이 올바르지 않아요")
     if fmt > FORMAT:
         raise ValueError("더 새로운 버전에서 만든 파일이에요")
@@ -289,29 +242,10 @@ def _check_head(doc, kind):
 
 def _validated_config(doc):
     _check_head(doc, "config")
-    out = {}
-    for table, cols in _COLUMNS.items():
-        rows = doc.get(table)
-        if not isinstance(rows, list):
-            raise ValueError(f"{table} 이 없어요")
-        clean = []
-        for row in rows:
-            if not isinstance(row, dict):
-                raise ValueError(f"{table} 줄이 올바르지 않아요")
-            r = {}
-            for col, (conv, required) in cols.items():
-                if col not in row or (row[col] is None and conv not in (_opt_int, _opt_float)):
-                    if required:
-                        raise ValueError(f"{table}.{col} 이 없어요")
-                    continue
-                r[col] = conv(row[col])
-            clean.append(r)
-        out[table] = sorted(clean, key=lambda r: r["id"])
-    settings = doc.get("settings") or {}
-    if not isinstance(settings, dict):
-        raise ValueError("settings 가 올바르지 않아요")
-    out["settings"] = {k: str(settings[k]) for k in backup._SETTING_KEYS if settings.get(k) is not None}
-    return out
+    for table in backup._TABLES:
+        if not isinstance(doc.get(table), list):
+            raise ValueError(f"{table} 이 없어요")   # 통째로 비우지 않게 파일을 받지 않는다
+    return backup.sanitize_tables(doc)
 
 
 def apply_config(conn, doc):
@@ -381,21 +315,21 @@ def build_state(conn, requests=(), today=None):
 def _clean_request(r):
     if not isinstance(r, dict):
         return None
-    rid = str(r.get("id") or "").strip()
-    if not rid or parse_utc(r.get("at")) is None:
+    rid = backup._clean_text(r.get("id"), 128)
+    if rid is None or backup._clean_timestamp(r.get("at")) is None or parse_utc(r.get("at")) is None:
         return None
-    try:
-        sid = _opt_int(r.get("schedule_id"))
-        snd = _opt_int(r.get("sound_id"))
-    except ValueError:
+    sid = backup._clean_int(r.get("schedule_id"))
+    snd = backup._clean_int(r.get("sound_id"))
+    if any(r.get(k) is not None and (v is None or v <= 0)
+           for k, v in (("schedule_id", sid), ("sound_id", snd))):
         return None
     if sid is None and snd is None:
         return None
     req = {"id": rid, "schedule_id": sid, "sound_id": snd, "at": str(r.get("at"))}
-    if parse_utc(r.get("ring_at")) is not None:   # 예전 버전이 넣은 요청에는 없음 (없는 채로 둔다)
+    if backup._clean_timestamp(r.get("ring_at")) is not None and parse_utc(r.get("ring_at")) is not None:
         req["ring_at"] = str(r.get("ring_at"))
-    req["by"] = str(r.get("by") or "")
-    req["by_name"] = str(r.get("by_name") or "")
+    req["by"] = backup._clean_text(r.get("by", ""), 80, required=False) or ""
+    req["by_name"] = backup._clean_text(r.get("by_name", ""), 200, required=False) or ""
     return req
 
 
@@ -408,35 +342,70 @@ def _validated_state(doc, today):
     _check_head(doc, "state")
     ov = doc.get("overrides", [])
     reqs = doc.get("ring_requests", [])
-    if not isinstance(ov, list) or not isinstance(reqs, list):
-        raise ValueError("state 가 올바르지 않아요")
+    if not isinstance(ov, list):
+        backup._validation_log("state.overrides: 목록이 아니어서 기본값 사용")
+        ov = []
+    if not isinstance(reqs, list):
+        backup._validation_log("state.ring_requests: 목록이 아니어서 기본값 사용")
+        reqs = []
     overrides = []
     seen = set()
-    for o in ov:
+    for o in ov[:500]:
         if not isinstance(o, dict):
             continue
-        date = str(o.get("date") or "")
-        action = str(o.get("action") or "")
+        date = backup._clean_text(o.get("date"), 10)
+        action = o.get("action") if isinstance(o.get("action"), str) else ""
         try:
-            sid = _int(o.get("schedule_id", 0))
+            if not date or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", date):
+                continue
+            datetime.strptime(date, "%Y-%m-%d")
         except ValueError:
             continue
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or action not in SHARED_ACTIONS or date < today:
+        sid = backup._clean_int(o.get("schedule_id", 0))
+        if action not in SHARED_ACTIONS or date < today or sid is None or sid < 0 or sid > backup.MAX_ID:
             continue
         if action == "PAUSE_DAY":
             sid = 0
+        elif sid == 0:
+            continue
         if (date, sid, action) in seen:
             continue
         seen.add((date, sid, action))
-        overrides.append((date, sid, action, str(o.get("note") or "")))
-    requests = [c for c in (_clean_request(r) for r in reqs) if c]
-    return bool(doc.get("paused")), overrides, requests
+        note = backup._clean_text(o.get("note", ""), 200, required=False) or ""
+        overrides.append((date, sid, action, note))
+    requests = []
+    seen_requests = set()
+    for r in reqs[:2000]:
+        clean = _clean_request(r)
+        if clean and clean["id"] not in seen_requests:
+            seen_requests.add(clean["id"])
+            requests.append(clean)
+    paused = doc.get("paused")
+    if isinstance(paused, bool):
+        paused = paused
+    elif isinstance(paused, int) and paused in (0, 1):
+        paused = bool(paused)
+    else:
+        paused = False
+    clean_overrides = [{"date": d, "schedule_id": sid, "action": a, "note": n} for d, sid, a, n in overrides]
+    for field, value in (("paused", paused), ("overrides", clean_overrides), ("ring_requests", requests)):
+        if doc.get(field, value) != value:
+            backup._validation_log(f"state.{field}: 잘못된 값/중복/초과 항목 보정")
+    return paused, overrides, requests
 
 
 def apply_state(conn, doc, today=None):
     """멈춤과 오늘·뒤 날짜의 SKIP_ONCE·PAUSE_DAY 를 파일 내용으로 바꾼다. (paused, 울리기 요청 목록) 을 돌려준다."""
     today = today or _today()
     paused, overrides, requests = _validated_state(doc, today)
+    schedule_ids = {int(r[0]) for r in conn.execute("SELECT id FROM schedules").fetchall()}
+    sound_ids = {int(r[0]) for r in conn.execute("SELECT id FROM sounds").fetchall()}
+    before = (len(overrides), len(requests))
+    overrides = [r for r in overrides if r[1] == 0 or r[1] in schedule_ids]
+    requests = [r for r in requests if (r["schedule_id"] is None or r["schedule_id"] in schedule_ids) and
+                (r["sound_id"] is None or r["sound_id"] in sound_ids)]
+    if before != (len(overrides), len(requests)):
+        backup._validation_log("state: 존재하지 않는 일정/소리 참조 삭제")
     try:
         conn.commit()
         conn.execute("BEGIN")
@@ -1032,9 +1001,17 @@ class CloudSync(QObject):
     def _load_handled(self):
         try:
             data = json.loads(repo.get_setting(self.conn, "ring_handled", "{}") or "{}")
-            return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
-        except Exception:
+        except (TypeError, ValueError):
+            backup._validation_log("ring_handled: 객체가 아니어서 기본값 사용")
             return {}
+        clean = {}
+        if isinstance(data, dict):
+            for key, value in list(data.items())[:2000]:
+                if backup._clean_text(key, 128) == key and backup._clean_timestamp(value) is not None and parse_utc(value) is not None:
+                    clean[key] = value
+        if clean != data:
+            backup._validation_log("ring_handled: 잘못된 값/초과 항목 삭제")
+        return clean
 
     def _save_handled(self):
         now = utc_now()

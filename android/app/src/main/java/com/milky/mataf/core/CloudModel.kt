@@ -61,7 +61,7 @@ object CloudModel {
 
     /** UTC ISO 8601 ('Z' 또는 +09:00 같은 오프셋, 오프셋이 없으면 UTC 로 본다) */
     fun parseInstant(s: String?): Instant? {
-        if (s.isNullOrBlank()) return null
+        if (s.isNullOrBlank() || s.length > 40 || !Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}[T ].*").matches(s)) return null
         val t = s.trim()
         return runCatching { Instant.parse(t) }.getOrNull()
             ?: runCatching { OffsetDateTime.parse(t).toInstant() }.getOrNull()
@@ -80,7 +80,9 @@ object CloudModel {
 
     /** 서버 경로로 쓸 수 있는 종소리 파일 이름인지 (폴더 없이, 끝이 점·공백이 아니게) */
     fun validFileName(fn: String): Boolean =
-        fn.isNotEmpty() && fn.length <= 200 && fn != "." && fn != ".." && SAFE_FILE.matches(fn) && !fn.endsWith(".") && !fn.endsWith(" ")
+        fn.isNotEmpty() && fn.length <= 200 && fn != "." && fn != ".." && SAFE_FILE.matches(fn) && !fn.endsWith(".") && !fn.endsWith(" ") &&
+            fn.toByteArray(Charsets.UTF_8).size <= 255 && String(fn.toByteArray(Charsets.UTF_8), Charsets.UTF_8) == fn &&
+            !Regex("(?i:CON|CONIN\\$|CONOUT\\$|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])").matches(fn.substringBefore('.'))
 
     fun soundPath(fn: String): String = SOUNDS + fn
 
@@ -89,6 +91,161 @@ object CloudModel {
         if (!path.startsWith(SOUNDS)) return null
         val fn = path.removePrefix(SOUNDS)
         return fn.takeIf { '/' !in it && validFileName(it) }
+    }
+
+    private const val MAX_ID = 2147483647L
+    private const val MAX_NAME = 200
+    private val MAX_ROWS = mapOf("sounds" to 256, "schedule_sets" to 128, "schedules" to 2000)
+
+    private fun cleanLong(v: Any?): Long? = when (v) {
+        is Boolean -> null
+        is Byte, is Short, is Int, is Long -> v.toString().toLongOrNull()?.takeIf { it in -MAX_ID..MAX_ID }
+        is Float, is Double -> (v as Number).toDouble().takeIf { it.isFinite() && it == kotlin.math.floor(it) && it in -MAX_ID.toDouble()..MAX_ID.toDouble() }?.toLong()
+        else -> null
+    }
+
+    private fun settingId(v: Any?): Long? = if (v is String)
+        v.takeIf { it.length <= 10 && Regex("[0-9]+").matches(it) }?.toLongOrNull()?.takeIf { it <= MAX_ID }
+        else cleanLong(v)
+
+    private fun cleanDouble(v: Any?): Double? = when (v) {
+        is Boolean, null -> null
+        is Number -> v.toDouble().takeIf { it.isFinite() }
+        else -> null
+    }
+
+    private fun cleanText(v: Any?, limit: Int = MAX_NAME, required: Boolean = true): String? =
+        (v as? String)?.trim()?.takeIf { (!required || it.isNotEmpty()) && it.length <= limit && it.none { c -> c.code < 32 } &&
+            String(it.toByteArray(Charsets.UTF_8), Charsets.UTF_8) == it }
+
+    private fun cleanFileName(v: Any?): String? {
+        var fn = (v as? String) ?: return null
+        if (fn.startsWith(SOUNDS)) fn = fn.removePrefix(SOUNDS)
+        return fn.takeIf { validFileName(it) && '/' !in it && '\\' !in it }
+    }
+
+    private fun validation(detail: String) =
+        System.err.println("TajongValidation: 값 검증 보정: $detail")
+
+    private fun cleanMeta(v: Any?): Map<String, Any?> {
+        val m = v.jObj() ?: emptyMap()
+        val clean = mapOf("device_id" to (cleanText(m["device_id"], 80, false) ?: ""),
+            "device_name" to (cleanText(m["device_name"], MAX_NAME, false) ?: ""),
+            "at" to ((m["at"] as? String)?.takeIf { parseInstant(it) != null } ?: ""))
+        if (v != clean) validation("meta: 잘못된 값 보정")
+        return clean
+    }
+
+    /** config/backup 입력을 SQLite에 넣기 전, 만들어질 수 없는 값과 참조를 제거한다. */
+    fun sanitizeTables(data: Map<String, Any?>): Map<String, Any?> {
+        val out = linkedMapOf<String, Any?>()
+        val fixed = LinkedHashSet<String>()
+        val ids = HashMap<String, MutableSet<Long>>()
+        val setNames = HashSet<String>()
+        for ((table, cols) in TABLES) {
+            val raw = data[table].jList()
+            if (data[table] != null && data[table] !is List<*>) fixed += "$table: 목록 아님"
+            val limit = MAX_ROWS.getValue(table)
+            if (raw.size > limit) fixed += "$table: 최대 개수 초과"
+            val clean = ArrayList<Map<String, Any?>>()
+            for (rawRow in raw.take(limit)) {
+                val row = rawRow.jObj()
+                if (row == null) { fixed += "$table: 객체 아님"; continue }
+                val id = cleanLong(row["id"])
+                if (id == null || id !in 1..MAX_ID || id in ids.getOrPut(table) { HashSet() }) {
+                    fixed += "$table: id 오류/중복"; continue
+                }
+                val item = linkedMapOf<String, Any?>("id" to id)
+                when (table) {
+                    "sounds" -> {
+                        val name = cleanText(row["name"])
+                        val fn = cleanFileName(row["file_name"])
+                        if (name == null || fn == null) {
+                            fixed += "sounds: 이름/파일명 오류"; continue
+                        }
+                        val volume = cleanDouble(row["volume"] ?: 1.0)
+                        item["name"] = name; item["file_name"] = fn
+                        item["volume"] = if (volume != null && volume in 0.0..2.0) volume else 1.0
+                        if (volume == null || volume !in 0.0..2.0) fixed += "sounds.volume: 기본값"
+                    }
+                    "schedule_sets" -> {
+                        val name = cleanText(row["name"])
+                        if (name == null || !setNames.add(name)) { fixed += "schedule_sets: 이름 오류/중복"; continue }
+                        item["name"] = name
+                    }
+                    "schedules" -> {
+                        val setId = cleanLong(row["set_id"])
+                        val name = cleanText(row["name"])
+                        val mask = cleanLong(row["weekday_mask"])
+                        val time = (row["time_hhmm"] as? String)?.let {
+                            Regex("([0-9]{2}):([0-9]{2})").matchEntire(it)?.let { m ->
+                                val h = m.groupValues[1].toInt(); val min = m.groupValues[2].toInt()
+                                if (h <= 23 && min <= 59) it else null
+                            }
+                        }
+                        val soundId = cleanLong(row["sound_id"])
+                        if (setId == null || setId !in 1..MAX_ID || name == null || mask == null || mask !in 1..127 ||
+                            time == null || soundId == null || soundId !in 1..MAX_ID) {
+                            fixed += "schedules: 필수 값 오류"; continue
+                        }
+                        item["set_id"] = setId; item["name"] = name; item["weekday_mask"] = mask
+                        item["time_hhmm"] = time; item["sound_id"] = soundId
+                        val volume = if (row.containsKey("volume_override") && row["volume_override"] != null) cleanDouble(row["volume_override"]) else null
+                        item["volume_override"] = if (volume != null && volume in 0.0..2.0) volume else null
+                        if (row["volume_override"] != null && (volume == null || volume !in 0.0..2.0)) fixed += "schedules.volume_override: 기본값"
+                        val enabled = when (val e = row["enabled"]) {
+                            is Boolean -> if (e) 1L else 0L
+                            else -> cleanLong(e)?.takeIf { it == 0L || it == 1L } ?: 1L
+                        }
+                        item["enabled"] = enabled
+                        item["sort_order"] = cleanLong(row["sort_order"])?.takeIf { it >= 0 } ?: 0L
+                        if (row.containsKey("enabled") && row["enabled"] !is Boolean && cleanLong(row["enabled"]) !in listOf(0L, 1L)) fixed += "schedules.enabled: 기본값"
+                        if (row.containsKey("sort_order") && cleanLong(row["sort_order"])?.let { it >= 0 } != true) fixed += "schedules.sort_order: 기본값"
+                    }
+                }
+                for (col in cols.filter { it.endsWith("_at") }) {
+                    if (row[col] == null) continue
+                    val text = cleanText(row[col], 40)?.takeIf { parseInstant(it.replace(' ', 'T')) != null }
+                    if (text != null) item[col] = text else fixed += "$table.$col: 기본값"
+                }
+                ids.getValue(table).add(id)
+                clean += item
+            }
+            out[table] = clean
+        }
+        val soundIds = out["sounds"].jList().mapNotNull { it.jObj()?.get("id")?.let(::cleanLong) }.toSet()
+        val setIds = out["schedule_sets"].jList().mapNotNull { it.jObj()?.get("id")?.let(::cleanLong) }.toSet()
+        val schedules = out["schedules"].jList().mapNotNull { it.jObj() }.filter {
+            val ok = cleanLong(it["sound_id"]) in soundIds && cleanLong(it["set_id"]) in setIds
+            if (!ok) fixed += "schedules: 참조 오류"
+            ok
+        }
+        out["schedules"] = schedules
+        val active = settingId(data["settings"].jObj()?.get("active_set_id"))
+        out["settings"] = if (active != null && active in setIds) mapOf("active_set_id" to active.toString()) else emptyMap<String, Any?>()
+        if (data["settings"].jObj()?.containsKey("active_set_id") == true && active !in setIds) fixed += "settings.active_set_id: 기본값"
+        if (data["settings"] != null && data["settings"] !is Map<*, *>) fixed += "settings: 객체 아님"
+        if (fixed.isNotEmpty()) validation(fixed.take(20).joinToString(", ") + if (fixed.size > 20) " 외" else "")
+        return out
+    }
+
+    fun sanitizeConfig(m: Map<String, Any?>): Map<String, Any?> = linkedMapOf<String, Any?>(
+        "app" to m["app"], "kind" to m["kind"], "format" to (if (m.containsKey("format")) m["format"] else FORMAT),
+    ).apply {
+        putAll(sanitizeTables(m)); if (m.containsKey("meta")) put("meta", cleanMeta(m["meta"]))
+    }
+
+    fun sanitizeManifest(m: Map<String, Any?>): Map<String, Any?> {
+        val format = if (m.containsKey("format")) cleanLong(m["format"]) else FORMAT.toLong()
+        require(m["app"] == APP && format != null && format >= 1) { "타종 프로그램 백업 파일이 아닙니다." }
+        require(format <= FORMAT) { "더 최신 버전에서 만든 백업입니다. 프로그램을 업데이트해 주세요." }
+        val counts = MAX_ROWS.mapValues { (table, limit) -> cleanLong(m["counts"].jObj()?.get(table))?.takeIf { it in 0..limit.toLong() } ?: 0L }
+        val version = cleanText(m["app_version"] ?: "", 64, false) ?: ""
+        val created = cleanText(m["created_at"] ?: "", 64, false) ?: ""
+        for ((field, value) in mapOf("counts" to counts, "app_version" to version, "created_at" to created)) {
+            if (m.containsKey(field) && m[field] != value) validation("manifest.$field: 기본값으로 보정")
+        }
+        return mapOf("counts" to counts, "app_version" to version, "created_at" to created)
     }
 
     // ---------------------------------------------------------------- config.json
@@ -104,14 +261,16 @@ object CloudModel {
     }
 
     fun isConfig(m: Map<String, Any?>?): Boolean = m != null && m["app"] == APP && (m["kind"] == null || m["kind"] == "config") &&
-        ((m["format"].jLong() ?: 1L) <= FORMAT)
+        validFormat(m)
+
+    private fun validFormat(m: Map<String, Any?>): Boolean =
+        (if (m.containsKey("format")) cleanLong(m["format"]) else FORMAT.toLong())?.let { it in 1..FORMAT.toLong() } == true
 
     fun rows(cfg: Map<String, Any?>, table: String): List<Map<String, Any?>> = cfg[table].jList().mapNotNull { it.jObj() }
 
     /** 종소리 파일 이름들 */
     fun soundFiles(cfg: Map<String, Any?>?): Set<String> =
-        if (cfg == null) emptySet() else rows(cfg, "sounds").mapNotNull { it["file_name"].jStr()?.substringAfterLast('/')?.substringAfterLast('\\') }
-            .filter { validFileName(it) }.toSet()
+        if (cfg == null) emptySet() else rows(cfg, "sounds").mapNotNull { cleanFileName(it["file_name"]) }.toSet()
 
     /** 처음 설치한 그대로인지: 일정 없음, 세트 하나 이하, 기본 종소리(bell1~8)만 */
     fun isDefaultConfig(cfg: Map<String, Any?>): Boolean =
@@ -148,17 +307,59 @@ object CloudModel {
         companion object {
             fun from(m: Map<String, Any?>?): RingRequest? {
                 if (m == null) return null
-                val id = m["id"].jStr()?.takeIf { it.isNotBlank() } ?: return null
-                val sched = m["schedule_id"].jLong()?.takeIf { it > 0 }
-                val sound = m["sound_id"].jLong()?.takeIf { it > 0 }
+                val id = cleanText(m["id"], 128)?.takeIf { it.isNotBlank() } ?: return null
+                if (parseInstant(m["at"] as? String) == null) return null
+                val sched = cleanLong(m["schedule_id"]).takeIf { it != null && it in 1..MAX_ID }
+                val sound = cleanLong(m["sound_id"]).takeIf { it != null && it in 1..MAX_ID }
+                if ((m["schedule_id"] != null && sched == null) || (m["sound_id"] != null && sound == null)) return null
                 if (sched == null && sound == null) return null
-                return RingRequest(id, sched, sound, m["at"].jStr() ?: "", m["by"].jStr() ?: "", m["by_name"].jStr() ?: "",
-                    m["ring_at"].jStr()?.takeIf { it.isNotBlank() })
+                return RingRequest(id, sched, sound, m["at"] as String,
+                    cleanText(m["by"], 80, false) ?: "", cleanText(m["by_name"], MAX_NAME, false) ?: "",
+                    (m["ring_at"] as? String)?.takeIf { it.isNotBlank() && parseInstant(it) != null })
             }
         }
     }
 
     data class State(val paused: Boolean, val overrides: List<Override>, val requests: List<RingRequest>)
+
+    fun sanitizeState(m: Map<String, Any?>): Map<String, Any?> {
+        val fixed = ArrayList<String>()
+        val overrides = ArrayList<Map<String, Any?>>()
+        val seen = HashSet<String>()
+        for (raw in m["overrides"].jList().take(500)) {
+            val o = raw.jObj()
+            if (o == null) { fixed += "overrides: 객체 아님"; continue }
+            val date = cleanText(o["date"], 10) ?: continue
+            if (runCatching { LocalDate.parse(date) }.isFailure) continue
+            val action = o["action"] as? String ?: continue
+            val rawId = cleanLong(o["schedule_id"] ?: 0L) ?: continue
+            val id = if (action == PAUSE_DAY) 0L else rawId
+            if (rawId !in 0..MAX_ID || (action == SKIP && id == 0L) || action !in setOf(SKIP, PAUSE_DAY) || !seen.add("$date/$id/$action")) continue
+            overrides += linkedMapOf("date" to date, "schedule_id" to id,
+                "action" to action, "note" to (cleanText(o["note"], MAX_NAME, false) ?: ""))
+        }
+        val requests = ArrayList<Map<String, Any?>>()
+        val requestIds = HashSet<String>()
+        for (raw in m["ring_requests"].jList().take(2000)) {
+            val r = RingRequest.from(raw.jObj())
+            if (r != null && requestIds.add(r.id)) requests += r.toMap()
+        }
+        val paused = when (val p = m["paused"]) {
+            is Boolean -> p
+            is Number -> cleanLong(p) == 1L
+            else -> false
+        }
+        for ((field, value) in mapOf("paused" to paused, "overrides" to overrides, "ring_requests" to requests)) {
+            if (m.containsKey(field) && m[field] != value) fixed += "$field: 잘못된 값/중복/초과 항목 보정"
+        }
+        if (m["overrides"] != null && m["overrides"] !is List<*>) fixed += "overrides: 목록 아님"
+        if (m["ring_requests"] != null && m["ring_requests"] !is List<*>) fixed += "ring_requests: 목록 아님"
+        if (fixed.isNotEmpty()) validation(fixed.take(20).joinToString(", ") + if (fixed.size > 20) " 외" else "")
+        return linkedMapOf<String, Any?>("app" to m["app"], "kind" to m["kind"], "format" to (if (m.containsKey("format")) m["format"] else FORMAT),
+            "paused" to paused, "overrides" to overrides, "ring_requests" to requests).apply {
+                if (m.containsKey("meta")) put("meta", cleanMeta(m["meta"]))
+            }
+    }
 
     /** 오늘과 그 뒤 날짜의 SKIP_ONCE·PAUSE_DAY 만, 같은 것은 하나로, 날짜·일정 순 */
     fun sharedOverrides(all: List<Override>, today: LocalDate): List<Override> {
@@ -185,21 +386,32 @@ object CloudModel {
     )
 
     fun isState(m: Map<String, Any?>?): Boolean = m != null && m["app"] == APP && m["kind"] == "state" &&
-        ((m["format"].jLong() ?: 1L) <= FORMAT)
+        validFormat(m)
 
     fun parseState(m: Map<String, Any?>): State {
-        val paused = when (val p = m["paused"]) {
+        val safe = sanitizeState(m)
+        val paused = when (val p = safe["paused"]) {
             is Boolean -> p
             else -> p.jLong() == 1L
         }
-        val ov = m["overrides"].jList().mapNotNull { it.jObj() }.mapNotNull { o ->
+        val ov = safe["overrides"].jList().mapNotNull { it.jObj() }.mapNotNull { o ->
             val date = o["date"].jStr()?.trim()?.takeIf { runCatching { LocalDate.parse(it) }.isSuccess } ?: return@mapNotNull null
             val action = o["action"].jStr() ?: return@mapNotNull null
             if (action != SKIP && action != PAUSE_DAY) return@mapNotNull null
             Override(date, if (action == PAUSE_DAY) 0 else o["schedule_id"].jLong() ?: return@mapNotNull null, action, o["note"].jStr() ?: "")
         }
-        val req = m["ring_requests"].jList().mapNotNull { RingRequest.from(it.jObj()) }
+        val req = safe["ring_requests"].jList().mapNotNull { RingRequest.from(it.jObj()) }
         return State(paused, ov, req)
+    }
+
+    fun referencedState(state: State, scheduleIds: Set<Long>, soundIds: Set<Long>): State {
+        val clean = state.copy(
+            overrides = state.overrides.filter { it.scheduleId == 0L || it.scheduleId in scheduleIds },
+            requests = state.requests.filter { (it.scheduleId == null || it.scheduleId in scheduleIds) &&
+                (it.soundId == null || it.soundId in soundIds) },
+        )
+        if (clean != state) validation("state: 존재하지 않는 일정/소리 참조 삭제")
+        return clean
     }
 
     /** 처음 보는 요청 중 울릴 때(ring_at, 없으면 at)가 지금 ±2분 안인 것 */
@@ -330,6 +542,18 @@ object CloudModel {
     // ---------------------------------------------------------------- 이 기기에 저장하는 동기화 상태
     data class FileSig(val size: Long, val mtime: Long, val sha: String)
 
+    private fun counter(v: Any?): Long? = when (v) {
+        is Long -> v.takeIf { it >= 0 }
+        is Int -> v.toLong().takeIf { it >= 0 }
+        is Double -> v.takeIf { it.isFinite() && it >= 0 && it < Long.MAX_VALUE.toDouble() && it == Math.floor(it) }?.toLong()
+        else -> null
+    }
+
+    private fun hash(v: Any?): String? = (v as? String)?.takeIf { Regex("[0-9a-f]{64}").matches(it) }
+
+    private fun syncPath(path: String): Boolean = path in listOf(CONFIG, STATE) || soundName(path) != null ||
+        Regex("logs/[A-Za-z0-9_-]{1,80}\\.json").matches(path)
+
     class SyncState {
         var seq = 0L
         val remote = LinkedHashMap<String, Entry>()
@@ -359,22 +583,46 @@ object CloudModel {
         companion object {
             fun from(m: Map<String, Any?>?): SyncState {
                 val s = SyncState()
-                if (m == null || m["v"].jLong() != 1L) return s
-                s.seq = m["seq"].jLong() ?: 0
-                m["remote"].jObj()?.forEach { (k, v) -> Entry.from(v.jObj())?.let { s.remote[k] = it } }
-                m["base"].jObj()?.forEach { (k, v) -> v.jObj()?.let { b -> s.base[k] = Base(b["rev"].jLong() ?: 0, b["sha"].jStr()) } }
-                s.lastConfig = m["lastConfig"].jStr()
-                s.lastConfigFiles = m["lastConfigFiles"].jList().mapNotNull { it.jStr() }.toSet()
-                s.lastState = m["lastState"].jStr()
-                s.lastLogs = m["lastLogs"].jStr()
-                s.requests = m["requests"].jList().mapNotNull { RingRequest.from(it.jObj()) }
-                m["handled"].jObj()?.forEach { (k, v) -> v.jLong()?.let { s.handled[k] = it } }
-                m["cache"].jObj()?.forEach { (k, v) ->
+                if (m == null) return s
+                if (cleanLong(m["v"]) != 1L) { validation("sync.v: 기본값"); return s }
+                s.seq = counter(m["seq"]) ?: 0
+                m["remote"].jObj()?.entries?.take(5000)?.forEach { (k, v) ->
+                    val e = v.jObj() ?: return@forEach
+                    if (!syncPath(k) || e["path"] != k || e["deleted"] !is Boolean || e["evicted"] !is Boolean) return@forEach
+                    val rev = counter(e["rev"]) ?: return@forEach
+                    val seq = counter(e["seq"]) ?: return@forEach
+                    val size = counter(e["size"]) ?: return@forEach
+                    val sha = hash(e["sha256"])
+                    if (e["sha256"] != null && sha == null) return@forEach
+                    s.remote[k] = Entry(k, rev, seq, sha, size, e["deleted"] == true, e["evicted"] == true, cleanText(e["deviceId"], 80))
+                }
+                m["base"].jObj()?.entries?.take(5000)?.forEach { (k, v) ->
+                    val b = v.jObj() ?: return@forEach
+                    if (!syncPath(k)) return@forEach
+                    val rev = counter(b["rev"]) ?: return@forEach
+                    val sha = hash(b["sha"])
+                    if (b["sha"] != null && sha == null) return@forEach
+                    s.base[k] = Base(rev, sha)
+                }
+                s.lastConfig = hash(m["lastConfig"])
+                s.lastConfigFiles = m["lastConfigFiles"].jList().take(256).mapNotNull { (it as? String)?.takeIf(::validFileName) }.toSet()
+                s.lastState = hash(m["lastState"])
+                s.lastLogs = hash(m["lastLogs"])
+                s.requests = sanitizeState(mapOf("ring_requests" to m["requests"]))["ring_requests"].jList().mapNotNull { RingRequest.from(it.jObj()) }
+                m["handled"].jObj()?.entries?.take(2000)?.forEach { (k, v) ->
+                    val id = cleanText(k, 128) ?: return@forEach
+                    counter(v)?.takeIf { it <= 253402300799999L }?.let { s.handled[id] = it }
+                }
+                m["cache"].jObj()?.entries?.take(256)?.forEach { (k, v) ->
+                    if (!validFileName(k)) return@forEach
                     v.jObj()?.let { c ->
-                        val sha = c["sha"].jStr() ?: return@let
-                        s.cache[k] = FileSig(c["size"].jLong() ?: -1, c["mtime"].jLong() ?: -1, sha)
+                        val sha = hash(c["sha"]) ?: return@let
+                        val size = counter(c["size"]) ?: return@let
+                        val mtime = counter(c["mtime"]) ?: return@let
+                        s.cache[k] = FileSig(size, mtime, sha)
                     }
                 }
+                for ((field, value) in s.toMap()) if (field != "v" && m.containsKey(field) && m[field] != value) validation("sync.$field: 잘못된 값/초과 항목 보정")
                 return s
             }
         }

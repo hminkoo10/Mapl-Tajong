@@ -117,7 +117,8 @@ class CloudModelTest {
     @Test
     fun ringRequestNeedsScheduleOrSound() {
         assertNull(RingRequest.from(mapOf("id" to "x", "at" to "2026-11-02T01:00:00Z")))
-        assertEquals(5L, RingRequest.from(mapOf("id" to "x", "sound_id" to 5L, "schedule_id" to null))?.soundId)
+        assertEquals(5L, RingRequest.from(mapOf("id" to "x", "sound_id" to 5L, "schedule_id" to null,
+            "at" to "2026-11-02T01:00:00Z"))?.soundId)
     }
 
     @Test
@@ -306,15 +307,57 @@ class CloudModelTest {
     fun syncStateRoundTrips() {
         val st = CloudModel.SyncState().apply {
             seq = 42
-            remote["config.json"] = Entry("config.json", 3, 40, "abc", 10, false, false, "dev-b")
-            base["config.json"] = Base(3, "abc")
-            lastConfig = "h1"; lastConfigFiles = setOf("b.wav", "a.wav"); lastState = "h2"; lastLogs = null
+            remote["config.json"] = Entry("config.json", 3, 40, "a".repeat(64), 10, false, false, "dev-b")
+            base["config.json"] = Base(3, "a".repeat(64))
+            lastConfig = "b".repeat(64); lastConfigFiles = setOf("b.wav", "a.wav"); lastState = "c".repeat(64); lastLogs = null
             requests = listOf(RingRequest("r1", null, 4, "2026-11-02T01:00:00Z", "dev-a", "폰"))
             handled["r0"] = 123L
-            cache["a.wav"] = CloudModel.FileSig(5, 6, "sha")
+            cache["a.wav"] = CloudModel.FileSig(5, 6, "d".repeat(64))
         }
         val back = CloudModel.SyncState.from(Json.parse(Json.write(st.toMap(), 0)).jObj())
         assertEquals(st.toMap(), back.toMap())
         assertEquals(0L, CloudModel.SyncState.from(mapOf("v" to 99L)).seq)
+    }
+
+    @Test
+    fun sanitizeConfigDropsGarbageAndKeepsValidRows() {
+        val cfg = mapOf<String, Any?>(
+            "app" to "MaplTajong", "kind" to "config", "format" to 1L,
+            "sounds" to listOf(
+                mapOf<String, Any?>("id" to 5L, "name" to "bell", "file_name" to "bell.wav", "volume" to Double.NaN),
+                mapOf<String, Any?>("id" to 6L, "name" to "bad", "file_name" to "../outside.wav", "volume" to 1.0),
+            ),
+            "schedule_sets" to listOf(mapOf<String, Any?>("id" to 3L, "name" to "평일")),
+            "schedules" to listOf(
+                mapOf<String, Any?>("id" to 7L, "set_id" to 3L, "name" to "1교시", "weekday_mask" to 127L,
+                    "time_hhmm" to "09:00", "sound_id" to 5L),
+                mapOf<String, Any?>("id" to 8L, "set_id" to 3L, "name" to "bad", "weekday_mask" to 127L,
+                    "time_hhmm" to "25:99", "sound_id" to 5L),
+            ),
+            "settings" to mapOf("active_set_id" to "3"),
+        )
+        val clean = CloudModel.sanitizeConfig(cfg)
+        assertEquals(listOf("bell.wav"), CloudModel.rows(clean, "sounds").map { it["file_name"] })
+        assertEquals(1.0, CloudModel.rows(clean, "sounds")[0]["volume"])
+        assertEquals(listOf(7L), CloudModel.rows(clean, "schedules").map { it["id"] })
+    }
+
+    @Test
+    fun sanitizeStateDropsWrongShapesAndInvalidRequests() {
+        val clean = CloudModel.sanitizeState(mapOf(
+            "app" to "MaplTajong", "kind" to "state", "format" to 1L, "paused" to "yes",
+            "overrides" to listOf(
+                mapOf<String, Any?>("date" to "2026-11-04", "schedule_id" to 7L, "action" to CloudModel.SKIP),
+                mapOf<String, Any?>("date" to "bad", "schedule_id" to 7L, "action" to CloudModel.SKIP),
+            ),
+            "ring_requests" to listOf(
+                mapOf<String, Any?>("id" to "ok", "schedule_id" to 7L, "at" to "2026-11-03T00:00:00Z"),
+                mapOf<String, Any?>("id" to "bad", "sound_id" to -1L, "at" to "bad"),
+            ),
+        ))
+        val parsed = CloudModel.parseState(clean)
+        assertFalse(parsed.paused)
+        assertEquals(1, parsed.overrides.size)
+        assertEquals(listOf("ok"), parsed.requests.map { it.id })
     }
 }

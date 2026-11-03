@@ -410,7 +410,12 @@ object Cloud {
             val key = dataKey
             val trust = DataSign.trust(bytes, doc, key, signedBefore(path))
             if (trust == DataSign.Trust.OK && key != null) markSigned(path)
-            doc to trust
+            val safe = when (path) {
+                CloudModel.CONFIG -> CloudModel.sanitizeConfig(doc)
+                CloudModel.STATE -> CloudModel.sanitizeState(doc)
+                else -> doc
+            }
+            safe to trust
         }
     } catch (err: CloudError) {
         if (err.status == 404 || err.status == 410) null else throw err
@@ -529,11 +534,14 @@ object Cloud {
         val repo = Repo(app)
         val db = repo.raw()
         val today = LocalDate.now()
+        val scheduleIds = db.rawQuery("SELECT id FROM schedules", null).use { c -> buildSet { while (c.moveToNext()) add(c.getLong(0)) } }
+        val soundIds = db.rawQuery("SELECT id FROM sounds", null).use { c -> buildSet { while (c.moveToNext()) add(c.getLong(0)) } }
+        val safe = CloudModel.referencedState(s, scheduleIds, soundIds)
         db.beginTransaction()
         try {
             db.execSQL("INSERT OR REPLACE INTO settings(key, value) VALUES('paused', ?)", arrayOf(if (s.paused) "1" else "0"))
             db.execSQL("DELETE FROM overrides WHERE action IN ('SKIP_ONCE','PAUSE_DAY') AND date_yyyymmdd >= ?", arrayOf(today.format(DATE)))
-            for (o in CloudModel.sharedOverrides(s.overrides, today)) {
+            for (o in CloudModel.sharedOverrides(safe.overrides, today)) {
                 db.execSQL("INSERT INTO overrides(date_yyyymmdd, schedule_id, action, note) VALUES(?, ?, ?, ?)",
                     arrayOf<Any?>(o.date, o.scheduleId, o.action, o.note))
             }
@@ -541,7 +549,7 @@ object Cloud {
         } finally {
             db.endTransaction()
         }
-        st.requests = s.requests
+        st.requests = safe.requests
         st.base[CloudModel.STATE] = Base(rs.rev, rs.sha)
         st.lastState = CloudModel.contentHash(buildState(repo, st.requests))
         handleRequests(st)

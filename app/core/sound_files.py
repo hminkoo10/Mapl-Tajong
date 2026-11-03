@@ -4,6 +4,7 @@
 다 쓴 뒤 최종 이름으로 바꾼다 (원자적 저장). .tmp 는 동기화하지 않는다 (magoedu-app.json 의 exclude).
 """
 import os
+import math
 import re
 import shutil
 import time
@@ -12,7 +13,7 @@ from pathlib import Path
 
 from app.core import ffmpeg
 from app.core.audio_edit import EditParams, render_edit
-from app.core.paths import originals_dir, sounds_dir, temp_dir
+from app.core.paths import asset_path, originals_dir, sounds_dir, temp_dir
 from app.data import repo
 
 AUDIO_EXTS = {".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".opus", ".webm"}
@@ -222,17 +223,38 @@ def _dur_file():
 
 
 def _load_durations():
+    from app.core.backup import _json_int, _validation_log
     global _dur_loaded
     if _dur_loaded:
         return
     _dur_loaded = True
     try:
         import json
-        for k, v in json.loads(_dur_file().read_text(encoding="utf-8")).items():
+        data = json.loads(_dur_file().read_text(encoding="utf-8"), parse_int=_json_int)
+    except FileNotFoundError:
+        return
+    except (OSError, ValueError):
+        _validation_log("durations: 읽을 수 없어 캐시 무시")
+        return
+    if not isinstance(data, dict):
+        _validation_log("durations: 객체가 아니어서 캐시 무시")
+        return
+    roots = (sounds_dir().resolve(), asset_path("sounds").resolve())
+    fixed = len(data) > 500
+    for k, v in list(data.items())[-500:]:
+        try:
             path, mt, size = k.rsplit("|", 2)
+            p = Path(path)
+            if (len(k) > 2048 or ".." in p.parts or not any(p.resolve().is_relative_to(root) for root in roots) or
+                    not re.fullmatch(r"[0-9]{1,19}", mt) or not re.fullmatch(r"[0-9]{1,19}", size) or
+                    int(mt) > 2 ** 63 - 1 or int(size) > 2 ** 63 - 1 or
+                    type(v) not in (int, float) or not math.isfinite(v) or v < 0):
+                raise ValueError()
             _dur_cache[(path, int(mt), int(size))] = v
-    except Exception:
-        pass
+        except (ValueError, TypeError, OSError, OverflowError):
+            fixed = True
+    if fixed:
+        _validation_log("durations: 잘못된 길이/경로/초과 항목 삭제")
 
 
 def _save_durations():
