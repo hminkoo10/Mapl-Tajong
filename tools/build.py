@@ -10,7 +10,9 @@
     dist\\MaplTajong-x.y.z-win-x64.zip.sha256
 """
 import argparse
+import ast
 import hashlib
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -24,6 +26,98 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
+
+# 검토한 순수 Python 로직만 컴파일한다. 누락/컴파일 실패 시 .py 로 대체하지 않는다.
+# 제외: main.py, ui/** (진입점/Qt), core/cloud_sync.py, single_instance.py,
+# startup.py (Qt import), core/paths.py, ytpot.py (__file__ 기반 경로).
+# core/weather.py 는 정의되지 않은 _shorter() 호출로 Cython 컴파일 불가 (원본 유지).
+CYTHON_INCLUDE = (
+    "app.core.audio_edit",
+    "app.core.backup",
+    "app.core.bootstrap",
+    "app.core.data_sign",
+    "app.core.ffmpeg",
+    "app.core.google_login",
+    "app.core.magoedu_cloud",
+    "app.core.net",
+    "app.core.player",
+    "app.core.scheduler",
+    "app.core.sound_files",
+    "app.core.timeutil",
+    "app.core.version",
+    "app.core.watchdog",
+    "app.core.youtube",
+    "app.data.db",
+    "app.data.repo",
+)
+
+
+def cython_hidden_imports(stage):
+    """네이티브화로 보이지 않게 되는 import 를 삭제 전 복사본에서 수집한다."""
+    hidden = set(CYTHON_INCLUDE)
+    for name in CYTHON_INCLUDE:
+        source = stage.joinpath(*name.split(".")).with_suffix(".py")
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                hidden.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module != "__future__":
+                module = node.module or ""
+                if node.level:
+                    module = importlib.util.resolve_name("." * node.level + module, name.rpartition(".")[0])
+                hidden.add(module)
+                # from app.core import ffmpeg 등: 함수/상수가 아닌 하위 모듈도 포함.
+                for alias in node.names:
+                    child = f"{module}.{alias.name}"
+                    path = stage.joinpath(*child.split("."))
+                    if path.with_suffix(".py").is_file() or path.is_dir():
+                        hidden.add(child)
+    return sorted(hidden)
+
+
+def native_module_exists(base, name):
+    path = base.joinpath(*name.split("."))
+    return any(path.with_suffix(suffix).is_file() for suffix in importlib.machinery.EXTENSION_SUFFIXES)
+
+
+def prepare_cython_app():
+    """app 원본은 건드리지 않고 build/cyapp 안에서만 복사·컴파일·소스 정리."""
+    stage = BUILD / "cyapp"
+    # junction/symlink 를 통해 작업 폴더 밖이나 원본을 지우지 않도록 확인한다.
+    if stage.resolve() != stage:
+        raise RuntimeError(f"스테이징 경로가 다른 위치를 가리켜요: {stage}")
+    if stage.exists():
+        shutil.rmtree(stage)
+    shutil.copytree(ROOT / "app", stage / "app",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "*.pyd", "*.so", "*.c"))
+    hidden = cython_hidden_imports(stage)
+    setup = stage / "setup.py"
+    setup.write_text(
+        "from setuptools import Extension, setup\n"
+        "from Cython.Build import cythonize\n\n"
+        f"modules = {CYTHON_INCLUDE!r}\n"
+        "setup(\n"
+        "    name='tajong-native',\n"
+        "    packages=[],\n"
+        "    ext_modules=cythonize(\n"
+        "        [Extension(name, [name.replace('.', '/') + '.py']) for name in modules],\n"
+        "        language_level=3,\n"
+        # 타입 힌트/자동 추론으로 Python 객체가 C 타입으로 바뀌지 않게 한다.
+        "        compiler_directives={'annotation_typing': False, 'infer_types': False, 'binding': True},\n"
+        "    ),\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    run([sys.executable, setup, "build_ext", "--inplace"], cwd=stage)
+    missing = [name for name in CYTHON_INCLUDE if not native_module_exists(stage, name)]
+    if missing:
+        raise RuntimeError("Cython 컴파일 결과가 없어요: " + ", ".join(missing))
+    # 모든 모듈 성공을 확인한 뒤에만 스테이징의 .py/.c 를 없앤다.
+    for name in CYTHON_INCLUDE:
+        source = stage.joinpath(*name.split(".")).with_suffix(".py")
+        source.unlink()
+        source.with_suffix(".c").unlink()
+    return stage, hidden
 
 
 def app_version():
@@ -143,12 +237,13 @@ def prune(app_dir):
     print(f"쓰지 않는 파일 정리: {saved / 1048576:.1f}MB 줄임", flush=True)
 
 
-def run(cmd):
+def run(cmd, cwd=ROOT):
     print(">", " ".join(str(c) for c in cmd), flush=True)
-    subprocess.run([str(c) for c in cmd], check=True, cwd=ROOT)
+    subprocess.run([str(c) for c in cmd], check=True, cwd=cwd)
 
 
 def build_exe(version, icon, need_deno=True):
+    stage, hidden = prepare_cython_app()
     vi = write_version_info(version)
     sep = os.pathsep
     args = [
@@ -156,7 +251,7 @@ def build_exe(version, icon, need_deno=True):
         "--name", "Mataf",
         "--icon", icon,
         "--version-file", vi,
-        "--paths", ROOT,
+        "--paths", stage,
         "--add-data", f"{ROOT / 'app' / 'assets'}{sep}assets",
         "--add-data", f"{ROOT / 'app' / 'data' / 'schema.sql'}{sep}app/data",
         "--add-data", f"{ROOT / 'CHANGELOG.md'}{sep}.",
@@ -166,6 +261,8 @@ def build_exe(version, icon, need_deno=True):
         "--collect-all", "yt_dlp",
         "--distpath", DIST, "--workpath", BUILD / "pyinstaller", "--specpath", BUILD,
     ]
+    for name in hidden:
+        args += ["--hidden-import", name]
     if importlib.util.find_spec("yt_dlp_ejs"):
         args += ["--collect-all", "yt_dlp_ejs"]
     deno = find_deno()
@@ -183,11 +280,15 @@ def build_exe(version, icon, need_deno=True):
     elif need_deno:
         sys.exit("bgutil-pot 을 찾지 못했어요. build/bin 에 넣거나 BGUTIL_POT 로 알려 주세요. "
                  "(--no-deno 로 YouTube 구성 요소 없이 빌드할 수 있어요)")
-    args.append(ROOT / "app" / "main.py")
-    run(args)
+    args.append(stage / "app" / "main.py")
+    # 작업 디렉터리도 스테이징으로 고정해 저장소의 app/*.py 가 섞이지 않게 한다.
+    run(args, cwd=stage)
     exe = DIST / "Mataf" / ("Mataf.exe" if os.name == "nt" else "Mataf")
     if not exe.exists():
         sys.exit("실행 파일이 만들어지지 않았어요.")
+    missing = [name for name in CYTHON_INCLUDE if not native_module_exists(exe.parent / "_internal", name)]
+    if missing:
+        raise RuntimeError("배포 폴더에 Cython 모듈이 없어요: " + ", ".join(missing))
     prune(exe.parent)
     return exe.parent
 

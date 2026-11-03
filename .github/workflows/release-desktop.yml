@@ -51,7 +51,7 @@ jobs:
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pyinstaller pillow
+          python -m pip install -r requirements.txt pyinstaller pillow cython setuptools
 
       # YouTube 봇 확인을 통과하는 증명값(PO 토큰) 생성기. 버전을 고정하고 GitHub가 알려 주는 SHA-256과 맞는지 확인한다.
       - name: Get PO token helper (bgutil-pot)
