@@ -5,7 +5,7 @@
     python tools\\build.py --no-zip   # 실행 파일 폴더만
 
 결과:
-    dist\\Mataf\\Mataf.exe                          (실행 파일 폴더, magoedu-app.json 포함)
+    dist\\Mataf\\Mataf.exe                          (실행 파일 폴더, magoedu-app.json·LICENSE.txt 포함)
     dist\\MaplTajong-x.y.z-win-x64.zip             (배포용 묶음 파일 — 통합 클라우드가 받아 설치)
     dist\\MaplTajong-x.y.z-win-x64.zip.sha256
 """
@@ -203,6 +203,11 @@ def write_manifest(app_dir, version):
     (app_dir / "magoedu-app.json").write_text(json.dumps(m, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def copy_license(app_dir):
+    """저장소의 LICENSE(GitHub 와 같은 AGPL-3.0)를 실행 파일 폴더 맨 위에 LICENSE.txt 로 둔다 (묶음 파일에도 들어감)."""
+    shutil.copyfile(ROOT / "LICENSE", app_dir / "LICENSE.txt")
+
+
 def _sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -241,6 +246,7 @@ def main():
     icon = windows_icon()
     src = build_exe(version, icon, need_deno=not a.no_deno)
     write_manifest(src, version)
+    copy_license(src)
     if a.no_zip:
         print(f"완료: {src}")
         return

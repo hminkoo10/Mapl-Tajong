@@ -68,18 +68,23 @@ android {
     }
 }
 
-// 업데이트 기록: android/CHANGELOG.md 를 앱(assets)에 함께 넣는다
+// 업데이트 기록(android/CHANGELOG.md)과 라이선스(저장소 맨 위 LICENSE — GitHub 와 같은 AGPL-3.0)를 앱(assets)에 함께 넣는다
 abstract class CopyChangelog : DefaultTask() {
     @get:InputFile abstract val source: RegularFileProperty
+    @get:InputFile abstract val license: RegularFileProperty
     @get:OutputDirectory abstract val outDir: DirectoryProperty
 
     @TaskAction
     fun run() {
         source.get().asFile.copyTo(outDir.get().file("CHANGELOG.md").asFile, overwrite = true)
+        license.get().asFile.copyTo(outDir.get().file("LICENSE.txt").asFile, overwrite = true)
     }
 }
 
-val copyChangelog = tasks.register<CopyChangelog>("copyChangelog") { source.set(rootProject.file("CHANGELOG.md")) }
+val copyChangelog = tasks.register<CopyChangelog>("copyChangelog") {
+    source.set(rootProject.file("CHANGELOG.md"))
+    license.set(rootProject.file("../LICENSE"))
+}
 androidComponents {
     onVariants { it.sources.assets?.addGeneratedSourceDirectory(copyChangelog, CopyChangelog::outDir) }
 }
