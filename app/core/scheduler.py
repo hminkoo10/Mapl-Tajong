@@ -1,6 +1,7 @@
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Optional
 
 from app.data import repo
 from app.core.paths import sound_file_path
@@ -17,7 +18,7 @@ def next_dt(base, hhmm):
 
 @dataclass
 class NextEvent:
-    schedule_id: int
+    schedule_id: Optional[int]
     name: str
     run_at: datetime
     sound_name: str
@@ -129,6 +130,11 @@ class Scheduler:
     def ring_event(self, ev, detail="forced"):
         """울린 것으로 표시해 둔 종을 지금 울린다 (울리기 요청의 ring_at 에)."""
         self._ring(ev, forced=True, detail=detail)
+
+    def ring_sound(self, sound, detail="forced"):
+        """시간표 없이 직접 울린 종도 기록한다. 들어보기에서는 부르지 않는다."""
+        ev = NextEvent(None, "", datetime.now(), str(sound["name"]), str(sound["file_name"]), float(sound["volume"]))
+        self._ring(ev, forced=True, detail=detail, raise_on_error=True)
 
     @staticmethod
     def _next_run_of(s, now):
@@ -342,7 +348,7 @@ class Scheduler:
                 seen.add((r["schedule_id"], r.get("schedule_name"), r["occurred_at"][:16]))
         return len(seen)
 
-    def _ring(self, ev, forced, detail=None):
+    def _ring(self, ev, forced, detail=None, raise_on_error=False):
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
             p = sound_file_path(ev.sound_file_name)
@@ -354,5 +360,7 @@ class Scheduler:
                 except Exception:
                     pass
         except Exception as e:
-            self._log(now_str, ev, "FAILED", str(e))
+            self._log(now_str, ev, "FAILED", f"{detail or 'forced'} · {e}" if forced else str(e))
             self._emit("failed", ev)
+            if raise_on_error:
+                raise

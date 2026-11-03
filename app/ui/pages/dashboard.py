@@ -4,7 +4,6 @@ from PyQt6.QtCore import QDateTime, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter
 from PyQt6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
-from app.core.paths import sound_file_path
 from app.core.timeutil import ampm, ampm_parts, format_remaining
 from app.core.version import DEVELOPER
 from app.data import repo
@@ -637,7 +636,7 @@ class DashboardPage(QWidget):
 
     def _play(self, s):
         try:
-            self.ctx.player.play(str(sound_file_path(str(s["file_name"]))), float(s["volume"]), str(s["name"]))
+            self.sch.ring_sound(s)
             self.eq.set_active(True)
         except Exception as e:
             self.ctx.toast(str(e), "error")
