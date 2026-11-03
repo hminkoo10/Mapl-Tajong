@@ -23,8 +23,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONArray
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -43,20 +43,16 @@ data class UpdateInfo(
     val assetUrl: String,
     val size: Long,
     val sha256: String?,
-    val shaUrl: String?,
 )
 
 /**
  * 자동 업데이트 (데스크톱 app/core/updater.py 와 같은 흐름).
- * GitHub Releases 에서 `MaplTajong-x.y.z.apk` 를 찾아 받고(SHA-256 확인), 안드로이드 설치기로 설치한다.
- * 데스크톱 릴리스도 같은 저장소에 올라오므로 '최신 릴리스'가 아니라 APK 파일 이름으로 버전을 찾는다.
+ * 로그인한 마고에듀 서버의 안드로이드 카탈로그에서 APK 를 찾아 받고(SHA-256 확인), 안드로이드 설치기로 설치한다.
+ * GitHub 조회·비공개 저장소 인증은 서버가 맡는다.
  */
 object Updater {
-    private const val REPO = "hminkoo10/Mapl-Tajong"
-    private const val RELEASES_API = "https://api.github.com/repos/$REPO/releases?per_page=30"
-    const val RELEASES_PAGE = "https://github.com/$REPO/releases"
-    private val ASSET_RE = Regex("""^MaplTajong-(\d+(?:\.\d+){1,3})\.apk$""", RegexOption.IGNORE_CASE)
-    private val ALLOWED_HOSTS = listOf("github.com", "githubusercontent.com")
+    private const val APP_ID = "tajong-android" // 동기화용 CloudModel.APP_ID(tajong)와 다름
+    private val SHA_RE = Regex("[0-9a-fA-F]{64}")
     private val UA = "MaplTajong-Android/${BuildConfig.VERSION_NAME}"
 
     fun parseVersion(s: String): List<Int> {
@@ -79,60 +75,76 @@ object Updater {
 
     private fun friendly(e: Exception): String = when {
         e is UpdateError -> e.message ?: ""
-        e is HttpError && e.code in setOf(403, 429) -> "업데이트 서버가 잠시 바빠요. 나중에 다시 확인할게요."
+        e is HttpError && e.code == 401 -> "클라우드 로그인이 끝났어요. 다시 로그인한 뒤 업데이트해 주세요."
+        e is HttpError && e.code == 403 -> "이 계정에는 안드로이드 앱을 받을 권한이 없어요. 관리자에게 문의해 주세요."
+        e is HttpError && e.code == 404 -> "서버에서 이 버전을 찾지 못했어요. 업데이트를 다시 확인해 주세요."
+        e is HttpError && e.code in setOf(429, 503) -> "업데이트 서버가 잠시 바빠요. 나중에 다시 확인할게요."
         e is HttpError -> "업데이트 정보를 가져오지 못했어요. (HTTP ${e.code})"
-        e is IOException -> "인터넷에 연결되어 있지 않아 업데이트를 확인하지 못했어요."
-        else -> "업데이트를 확인하지 못했어요. ($e)"
+        e is IOException -> "마고에듀 서버에 연결하지 못했어요. 서버 주소와 인터넷 연결을 확인한 뒤 다시 시도해 주세요."
+        else -> "서버의 업데이트 정보를 읽지 못했어요. 잠시 뒤 다시 확인해 주세요."
     }
 
     private class HttpError(val code: Int) : IOException("HTTP $code")
 
-    private fun checkHost(url: String) {
-        val host = url.toHttpUrlOrNull()?.host?.lowercase() ?: ""
-        if (ALLOWED_HOSTS.none { host == it || host.endsWith(".$it") }) throw UpdateError("알 수 없는 주소라서 받지 않았어요.")
+    private fun requireCredentials(value: Pair<String, String>?): Pair<String, String> {
+        if (value == null || value.second.isBlank()) throw UpdateError("마고에듀 통합 클라우드에 로그인한 뒤 업데이트를 확인해 주세요.")
+        return value.first.trimEnd('/') to value.second
     }
 
-    private fun open(url: String, accept: String = "*/*") =
-        Online.http.newCall(Request.Builder().url(url).header("User-Agent", UA).header("Accept", accept).build()).execute().also {
+    private fun open(url: String, server: String, token: String, http: OkHttpClient, accept: String = "*/*"): okhttp3.Response {
+        val base = server.toHttpUrlOrNull() ?: throw UpdateError("클라우드 서버 주소가 올바르지 않아요.")
+        val target = url.toHttpUrlOrNull() ?: throw UpdateError("업데이트 주소가 올바르지 않아요.")
+        if (target.scheme != base.scheme || target.host != base.host || target.port != base.port) {
+            throw UpdateError("클라우드 서버가 바뀌었어요. 업데이트를 다시 확인해 주세요.")
+        }
+        // 공개 파일은 서버가 302로 보낼 수 있다. OkHttp는 다른 origin으로 넘어갈 때 Authorization을 제거한다.
+        // HTTPS → HTTP 전환과 GitHub API 호출은 허용하지 않는다.
+        val client = http.newBuilder().followRedirects(true).followSslRedirects(false).addNetworkInterceptor { chain ->
+            if (chain.request().url.host == "api.github.com") throw IOException("GitHub API는 서버에서만 호출해요.")
+            chain.proceed(chain.request())
+        }.build()
+        return client.newCall(Request.Builder().url(target).header("User-Agent", UA).header("Accept", accept)
+            .header("Authorization", "Bearer $token").build()).execute().also {
             if (!it.isSuccessful) {
                 it.close(); throw HttpError(it.code)
             }
         }
+    }
 
     /** 새 버전이 있으면 UpdateInfo, 없으면 null (작업 스레드에서) */
-    fun check(current: String = BuildConfig.VERSION_NAME): UpdateInfo? {
-        val data = try {
-            open(RELEASES_API, "application/vnd.github+json").use { JSONArray(it.body?.string() ?: "[]") }
+    fun check(current: String = BuildConfig.VERSION_NAME): UpdateInfo? = check(current, Cloud.credentials(), CloudApi.http)
+
+    internal fun check(current: String, credentials: Pair<String, String>?, http: OkHttpClient): UpdateInfo? {
+        val (server, token) = requireCredentials(credentials)
+        try {
+            val data = open("$server/api/apps", server, token, http, "application/json").use {
+                Json.parse(it.body?.string().orEmpty()).jObj()
+            } ?: throw UpdateError("서버의 업데이트 정보를 읽지 못했어요.")
+            val apps = data["apps"] as? List<*> ?: throw UpdateError("서버의 앱 목록을 읽지 못했어요.")
+            val app = apps.mapNotNull { it.jObj() }.firstOrNull {
+                it["id"] == APP_ID && it["platform"] == "android" && it["allowed"] != false
+            } ?: throw UpdateError("서버에서 안드로이드 타종 앱을 찾지 못했어요. 앱 등록과 사용 권한을 확인해 주세요.")
+            val rel = app["release"].jObj() ?: throw UpdateError("서버에 배포된 안드로이드 버전이 아직 없어요.")
+            val version = rel["version"].jStr().orEmpty()
+            val fileName = rel["fileName"].jStr().orEmpty()
+            if (!Regex("""\d+(?:\.\d+){1,3}""").matches(version) ||
+                !Regex("""[^/\\]+\.apk""", RegexOption.IGNORE_CASE).matches(fileName)) {
+                throw UpdateError("서버의 안드로이드 업데이트 정보가 올바르지 않아요.")
+            }
+            if (!isNewer(version, current)) return null
+            return UpdateInfo(
+                version = version,
+                title = version,
+                notes = rel["notes"].jStr().orEmpty(),
+                pageUrl = "$server/",
+                assetName = fileName,
+                assetUrl = "$server/api/apps/$APP_ID/download?version=${CloudApi.enc(version)}",
+                size = (rel["size"].jLong() ?: 0L).coerceAtLeast(0),
+                sha256 = rel["sha256"].jStr()?.takeIf { SHA_RE.matches(it) }?.lowercase(),
+            )
         } catch (e: Exception) {
             throw UpdateError(friendly(e))
         }
-        var best: UpdateInfo? = null
-        for (i in 0 until data.length()) {
-            val rel = data.optJSONObject(i) ?: continue
-            if (rel.optBoolean("draft") || rel.optBoolean("prerelease")) continue
-            val assets = rel.optJSONArray("assets") ?: continue
-            val list = List(assets.length()) { assets.getJSONObject(it) }
-            val byName = list.associateBy { it.optString("name") }
-            for (a in list) {
-                val m = ASSET_RE.matchEntire(a.optString("name")) ?: continue
-                val ver = m.groupValues[1]
-                if (best != null && !isNewer(ver, best.version)) continue
-                val digest = a.optString("digest")
-                val side = byName[a.getString("name") + ".sha256"]
-                best = UpdateInfo(
-                    version = ver,
-                    title = rel.optString("name").ifEmpty { ver },
-                    notes = if (rel.isNull("body")) "" else rel.optString("body"),
-                    pageUrl = rel.optString("html_url").ifEmpty { RELEASES_PAGE },
-                    assetName = a.getString("name"),
-                    assetUrl = a.optString("browser_download_url"),
-                    size = a.optLong("size"),
-                    sha256 = if (digest.startsWith("sha256:")) digest.substringAfter(":").lowercase() else null,
-                    shaUrl = side?.optString("browser_download_url"),
-                )
-            }
-        }
-        return best?.takeIf { isNewer(it.version, current) }
     }
 
     private fun sha256(f: File): String {
@@ -149,20 +161,16 @@ object Updater {
     }
 
     /** APK 를 받아 SHA-256 을 확인한 뒤 파일을 돌려준다 */
-    fun download(ctx: Context, info: UpdateInfo, progress: (Float) -> Unit = {}, cancelled: () -> Boolean = { false }): File {
-        checkHost(info.assetUrl)
-        var expected = info.sha256
-        if (expected == null && info.shaUrl != null) {
-            checkHost(info.shaUrl)
-            expected = try {
-                open(info.shaUrl).use { r -> Regex("\\b([0-9a-fA-F]{64})\\b").find(r.body?.string()?.take(4096) ?: "")?.groupValues?.get(1)?.lowercase() }
-            } catch (e: Exception) {
-                throw UpdateError(friendly(e))
-            }
-        }
-        if (expected == null) throw UpdateError("설치 파일을 확인할 값(SHA-256)이 없어서 받지 않았어요.")
+    fun download(ctx: Context, info: UpdateInfo, progress: (Float) -> Unit = {}, cancelled: () -> Boolean = { false }): File =
+        download(dir(ctx), info, Cloud.credentials(), CloudApi.http, progress, cancelled)
 
-        val dst = File(dir(ctx), File(info.assetName).name)
+    internal fun download(directory: File, info: UpdateInfo, credentials: Pair<String, String>?, http: OkHttpClient,
+                          progress: (Float) -> Unit = {}, cancelled: () -> Boolean = { false }): File {
+        val (server, token) = requireCredentials(credentials)
+        val expected = info.sha256?.takeIf { SHA_RE.matches(it) }?.lowercase()
+            ?: throw UpdateError("설치 파일을 확인할 값(SHA-256)이 없어서 받지 않았어요. 서버의 배포 정보를 확인해 주세요.")
+
+        val dst = File(directory, File(info.assetName).name)
         if (dst.exists() && sha256(dst) == expected) {
             progress(1f)
             return dst
@@ -170,7 +178,7 @@ object Updater {
         val part = File(dst.path + ".part")
         val md = MessageDigest.getInstance("SHA-256")
         try {
-            open(info.assetUrl).use { r ->
+            open(info.assetUrl, server, token, http).use { r ->
                 val body = r.body ?: throw UpdateError("받은 파일이 비어 있어요.")
                 val total = body.contentLength().takeIf { it > 0 } ?: info.size
                 var done = 0L
@@ -348,11 +356,12 @@ object Updates {
                 if (auto(repo)) download(app)
             } catch (e: Exception) {
                 _state.value = _state.value.copy(lastCheck = LocalDateTime.now())
-                if (_state.value.info != null) {
-                    set("available"); return@launch
-                }
                 val msg = e.message ?: "업데이트를 확인하지 못했어요."
-                set(if (manual) "error" else "idle", msg)
+                if (_state.value.info != null) {
+                    set("available", msg)
+                } else {
+                    set(if (manual) "error" else "idle", msg)
+                }
                 if (manual) Toasts.show(msg, "warning")
             }
         }
