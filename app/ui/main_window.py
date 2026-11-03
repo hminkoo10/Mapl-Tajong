@@ -216,15 +216,27 @@ class MainWindow(QMainWindow):
 
     def _shutdown(self, code=0):
         try:
+            self.conn.commit()
+        except Exception:
+            if code == cloud.RESTART_EXIT_CODE:
+                return False
+        if self.sync is not None:
+            try:
+                saved = self.sync.flush()
+                if code == cloud.RESTART_EXIT_CODE and saved is False:
+                    return False
+            except Exception:
+                if code == cloud.RESTART_EXIT_CODE:
+                    return False
+        # 내보내는 동안 다른 기기 시간표나 울리기 요청을 받아 적용했을 수도 있다.
+        if code == cloud.RESTART_EXIT_CODE and self.restart_watch is not None:
+            if not self.restart_watch.is_safe_now():
+                return False
+        try:
             self.scheduler.stop()
             self.player.stop()
         except Exception:
             pass
-        if self.sync is not None:
-            try:
-                self.sync.flush()
-            except Exception:
-                pass
         try:
             self.tray.hide()
         except Exception:
@@ -236,10 +248,11 @@ class MainWindow(QMainWindow):
                 pass
         self._really_quit = True
         self.app.exit(code)
+        return True
 
     def restart_for_update(self):
         """통합 클라우드가 받아 둔 새 버전으로 다시 켜지도록 종료 코드 75 로 끝낸다."""
-        self._shutdown(cloud.RESTART_EXIT_CODE)
+        return self._shutdown(cloud.RESTART_EXIT_CODE)
 
     def on_exit_app(self):
         if self.isHidden():

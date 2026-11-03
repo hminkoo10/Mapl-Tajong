@@ -133,6 +133,50 @@ class Base(unittest.TestCase):
         cloud_sync.write_json_atomic(self.data / name, doc)
 
 
+class FlushTests(Base):
+    def make_changed_device(self):
+        a = Device(self.data, "devA", "A")
+        fill_sample(a.conn)
+        a.start()
+        repo.update_sound(a.conn, 5, "바꾼 종", 1.0)
+        a.sch.pause()
+        repo.insert_log(a.conn, f"{today()} 00:00:10", 7, "1교시", "bell1", "PLAYED", "")
+        a.sync.local_changed()
+        a.sync.log_added()
+        return a
+
+    def test_flush_saves_pending_config_state_and_logs(self):
+        a = self.make_changed_device()
+        self.assertTrue(a.sync.flush())
+        self.assertEqual(self.read("config.json")["sounds"][0]["name"], "바꾼 종")
+        self.assertTrue(self.read("state.json")["paused"])
+        self.assertEqual(len(self.read("logs/devA.json")["logs"]), 1)
+        self.assertFalse(a.sync._export_timer.isActive())
+        self.assertFalse(a.sync._logs_timer.isActive())
+        self.assertTrue(a.sync.flush())   # 바뀐 것이 없어도 저장 완료
+
+    def test_flush_reports_write_failure_and_retries_without_timer(self):
+        a = self.make_changed_device()
+        with mock.patch.object(cloud_sync, "write_json_atomic", side_effect=OSError("cannot save")), \
+             mock.patch.object(cloud_sync.QTimer, "singleShot"):
+            self.assertFalse(a.sync.flush())
+        self.assertFalse(a.sync._export_timer.isActive())
+        self.assertFalse(a.sync._logs_timer.isActive())
+        self.assertTrue(a.sync.flush())
+        self.assertEqual(self.read("config.json")["sounds"][0]["name"], "바꾼 종")
+        self.assertTrue(self.read("state.json")["paused"])
+        self.assertEqual(len(self.read("logs/devA.json")["logs"]), 1)
+
+    def test_flush_reports_log_only_write_failure(self):
+        a = self.make_changed_device()
+        a.sync.export_now()
+        with mock.patch.object(cloud_sync, "write_json_atomic", side_effect=OSError("cannot save")), \
+             mock.patch.object(cloud_sync.QTimer, "singleShot"):
+            self.assertFalse(a.sync.flush())
+        self.assertTrue(a.sync.flush())
+        self.assertEqual(len(self.read("logs/devA.json")["logs"]), 1)
+
+
 class ConfigTests(Base):
     def test_export_then_apply_keeps_ids(self):
         a = Device(self.data, "devA", "교무실 PC")
