@@ -31,7 +31,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-__all__ = ["Session", "check", "verify_ticket", "open_cloud", "newer_version_installed", "RESTART_EXIT_CODE", "REASON"]
+__all__ = ["Session", "check", "verify_ticket", "open_cloud", "installed_version_file", "newer_version_installed",
+           "RESTART_EXIT_CODE", "REASON"]
 
 RESTART_EXIT_CODE = 75  # 이 값으로 끝내면 통합 클라우드가 바로 다시 켠다 (새 버전 적용)
 TICKET_PREFIX = "MGT1"
@@ -303,14 +304,19 @@ def _parse_version(v):
     return tuple(nums)
 
 
-def newer_version_installed(app_id: str, current_version: str) -> str | None:
-    """통합 클라우드가 새 버전을 받아 두었으면 그 버전 (프로그램을 75 로 끝내면 새 버전으로 다시 켜짐)"""
+def installed_version_file(app_id: str) -> Path:
+    """통합 클라우드가 설치를 마친 뒤 바꾸는 버전 정보 파일."""
     if sys.platform == "win32":
         base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")) / CLOUD_DIR_NAME
     else:
         base = default_trust_file().parent / "local"
+    return base / "apps" / app_id / "installed.json"
+
+
+def newer_version_installed(app_id: str, current_version: str) -> str | None:
+    """통합 클라우드가 새 버전을 받아 두었으면 그 버전 (프로그램을 75 로 끝내면 새 버전으로 다시 켜짐)"""
     try:
-        info = json.loads((base / "apps" / app_id / "installed.json").read_text(encoding="utf-8"))
+        info = json.loads(installed_version_file(app_id).read_text(encoding="utf-8"))
     except Exception:
         return None
     v = info.get("version")

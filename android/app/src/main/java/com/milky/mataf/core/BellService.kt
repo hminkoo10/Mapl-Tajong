@@ -28,6 +28,13 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.Collections
 
+/** 수동 타종의 재생 결과를 기록에 넘긴다. */
+internal fun manualRingReport(scheduleId: Long?, scheduleName: String, soundName: String, detail: String?,
+                              log: (Long?, String, String, String, String) -> Unit): (String?) -> Unit = { err ->
+    val source = detail ?: "forced"
+    log(scheduleId, scheduleName, soundName, if (err == null) "PLAYED" else "FAILED", if (err == null) source else "$source · $err")
+}
+
 /** 종을 울리는 동안 앞에서 도는 서비스 (화면이 꺼져 있어도 끝까지 울리게) */
 class BellService : Service() {
 
@@ -78,7 +85,7 @@ class BellService : Service() {
 
         /**
          * '지금 울리기' 요청(state.json 의 ring_requests)의 종을 울릴 때(atMillis, ring_at)에 울린다. 시간표 종이면 scheduleId, 아니면 soundId.
-         * detail: 기록 설명. 다른 기기의 요청이면 "forced · <요청한 기기>", 이 기기가 누른 것이면 null (시간표 종은 "forced", 종소리는 기록 없음).
+         * detail: 기록 설명. 다른 기기의 요청이면 "forced · <요청한 기기>", 이 기기가 누른 것이면 null ("forced"로 기록).
          * 울림 서비스를 바로 켜서, 서비스 안에서 소리를 미리 열어 두고 울릴 때까지 기다린다 (알람은 5초 안으로는 정확히 걸리지 않음).
          * 울릴 때가 이미 지났으면 바로. 울릴 때 이 기기가 종을 울리지 않게 됐으면 울리지 않는다. 요청마다 따로 기다린다.
          */
@@ -247,22 +254,20 @@ class BellService : Service() {
         if (pending.isEmpty()) releaseWake()
     }
 
-    /** '지금 울리기'의 종을 찾아 소리를 열어 둔다 (일정·종소리가 없어졌으면 null). 종소리는 detail 이 있을 때(다른 기기의 요청)만 기록한다 */
+    /** '지금 울리기'의 종을 찾아 소리를 열어 둔다 (일정·종소리가 없어졌으면 null). 재생 결과는 수동 타종으로 기록한다 */
     private fun openRequest(i: Intent): Ready? {
         val repo = Repo(this)
         val id = i.getLongExtra(E_ID, -1)
         val detail = i.getStringExtra(E_DETAIL)
         if (i.getStringExtra(KIND) == K_FORCED) {
             val s = repo.schedule(id) ?: return null
-            return open(Sounds.file(this, s.soundFile).absolutePath, s.volume, s.name) { err ->
-                repo.log(id, s.name, s.soundName, if (err == null) "PLAYED" else "FAILED", if (err == null) detail ?: "forced" else err)
-            }
+            return open(Sounds.file(this, s.soundFile).absolutePath, s.volume, s.name,
+                manualRingReport(id, s.name, s.soundName, detail, repo::log))
         }
         val s = repo.sound(id) ?: return null
         val volume = i.getDoubleExtra(E_VOL, -1.0)
-        return open(Sounds.file(this, s.fileName).absolutePath, if (volume >= 0) volume else s.volume, s.name) { err ->
-            if (detail != null) repo.log(null, "", s.name, if (err == null) "PLAYED" else "FAILED", if (err == null) detail else err)
-        }
+        return open(Sounds.file(this, s.fileName).absolutePath, if (volume >= 0) volume else s.volume, s.name,
+            manualRingReport(null, "", s.name, detail, repo::log))
     }
 
     /** onStarted(null) = 재생 시작, onStarted("오류") = 실패 */

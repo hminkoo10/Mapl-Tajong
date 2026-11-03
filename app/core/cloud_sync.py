@@ -32,7 +32,7 @@ from PyQt6.QtCore import QFileSystemWatcher, QObject, Qt, QTimer, pyqtSignal
 
 from app.core import backup, data_sign
 from app.core.sound_files import copy_atomic, remove_leftover_tmp
-from app.core.paths import app_data_dir, asset_path, backups_dir, db_path, legacy_data_dir, sound_file_path, sync_dir
+from app.core.paths import app_data_dir, asset_path, backups_dir, db_path, legacy_data_dir, sync_dir
 from app.data import repo
 
 APP = "MaplTajong"
@@ -797,12 +797,12 @@ class CloudSync(QObject):
         self._export("state")
 
     def flush(self):
-        """끄기 전에: 모아 둔 것을 바로 쓴다."""
-        if self._export_timer.isActive():
-            self.export_now()
-        if self._logs_timer.isActive():
-            self._logs_timer.stop()
-            self.export_logs()
+        """끄기 전에: 모아 둔 것을 바로 쓰고, 모두 저장됐는지 돌려준다."""
+        self.export_now()
+        self._logs_timer.stop()
+        self.export_logs()
+        return (all(content_key(self._build(kind)) == self._synced.get(kind) for kind in ("config", "state"))
+                and content_key(build_logs(self.conn, self.device_id, self.device_name)) == self._seen.get("logs"))
 
     def _build(self, kind, requests=None):
         if kind == "config":
@@ -1084,7 +1084,7 @@ class CloudSync(QObject):
         if s is None:
             return
         try:
-            self.scheduler.player.play(str(sound_file_path(str(s["file_name"]))), float(s["volume"]), str(s["name"]))
+            self.scheduler.ring_sound(s, detail=f"forced · {who}")
             self.notice.emit(f"{who}에서 요청해서 {s['name']} 종소리를 울렸어요", "bell")
         except Exception as e:
             self.notice.emit(f"{who}의 요청을 울리지 못했어요: {e}", "error")

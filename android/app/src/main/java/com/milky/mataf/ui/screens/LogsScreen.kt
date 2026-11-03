@@ -45,10 +45,9 @@ import java.time.LocalDate
 
 val RESULT_LABELS = mapOf("PLAYED" to "울림", "SKIPPED" to "건너뜀", "FAILED" to "실패", "MISSED" to "놓침")
 
-/** 기록 설명: 'forced' = 미리 울림, 'forced · 원장님 폰' = 다른 기기의 요청으로 울림 */
+/** 기록 설명: 'forced' = 수동 타종, 'forced · 원장님 폰' = 수동 타종 · 원장님 폰 */
 fun detailText(d: String): String = when {
-    d == "forced" -> "미리 울림"
-    d.startsWith("forced · ") -> "${d.removePrefix("forced · ")} 요청"
+    d == "forced" || d.startsWith("forced · ") -> "수동 타종" + d.removePrefix("forced")
     else -> d
 }
 
