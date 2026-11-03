@@ -120,8 +120,7 @@ PRUNE = [
     "PyQt6/Qt6/bin/opengl32sw.dll",
     "PyQt6/Qt6/bin/d3dcompiler_47.dll",
     "PyQt6/Qt6/bin/Qt6Pdf.dll",
-    "PyQt6/Qt6/bin/Qt6Network.dll",
-    "PyQt6/Qt6/lib/libQt6Network.so*",
+    # Qt6Network 는 지우지 않는다: 두 번째 실행이 켜진 창을 여는 데 씀 (app/core/single_instance.py)
 ]
 
 

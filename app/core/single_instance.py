@@ -3,7 +3,6 @@ import os
 import sys
 from pathlib import Path
 from PyQt6.QtCore import QLockFile, QDir
-from PyQt6.QtNetwork import QLocalServer
 
 _lock = None
 
@@ -47,6 +46,10 @@ def show_running(app_name):
 
 def listen(app_name, on_show):
     """두 번째 실행의 '창 열기' 요청을 받는다. 서버는 프로그램이 끝날 때까지 들고 있어야 함."""
+    try:
+        from PyQt6.QtNetwork import QLocalServer
+    except ImportError:   # 묶음에 QtNetwork 가 없어도 프로그램은 켜져야 한다
+        return None
     server = QLocalServer()
     if not server.listen(_server_name(app_name)):
         return None

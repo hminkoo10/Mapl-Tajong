@@ -31,3 +31,9 @@ class SecondLaunchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BuildKeepsNetworkTests(unittest.TestCase):
+    def test_build_does_not_prune_qt_network(self):
+        from tools import build
+        self.assertFalse([p for p in build.PRUNE if "Network" in p])
