@@ -2,7 +2,7 @@ import math
 from pathlib import Path
 
 from PyQt6.QtCore import QPoint, QRectF, Qt, QTime, QTimer, QVariantAnimation
-from PyQt6.QtGui import QPainter
+from PyQt6.QtGui import QGuiApplication, QPainter
 from PyQt6.QtWidgets import (QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                              QMainWindow, QScrollArea, QSlider, QSpinBox, QTimeEdit, QVBoxLayout, QWidget)
 
@@ -162,8 +162,13 @@ class BaseDialog(QDialog):
         pw = self.parentWidget()
         host = pw.window() if pw is not None else None
         if host is not None:
-            g = host.frameGeometry()
-            self.move(g.center().x() - self.width() // 2, g.center().y() - self.height() // 2)
+            c = host.frameGeometry().center()
+            x, y = c.x() - self.width() // 2, c.y() - self.height() // 2
+            # 메인 창이 화면 아래·옆으로 밀려나 있어도 창은 화면 안에 띄운다 (밖에 뜨면 누를 수 없어 앱이 멈춘 듯 보임)
+            scr = (QGuiApplication.screenAt(c) or host.screen() or QGuiApplication.primaryScreen()).availableGeometry()
+            x = max(scr.left(), min(x, scr.right() - self.width()))
+            y = max(scr.top(), min(y, scr.bottom() - self.height()))
+            self.move(x, y)
         if isinstance(host, QMainWindow) and host.centralWidget() is not None and self._dim is None:
             self._dim = _Dim(host.centralWidget())
             dim = self._dim
