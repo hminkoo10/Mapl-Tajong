@@ -89,6 +89,7 @@ import kotlin.math.pow
 private fun fmt(t: Double): String {
     val m = (t / 60).toInt()
     val s = t - m * 60
+    if (m >= 60) return "%d:%02d:%05.2f".format(m / 60, m % 60, s)
     return if (m > 0) "%d:%05.2f".format(m, s) else "%.2f초".format(s)
 }
 

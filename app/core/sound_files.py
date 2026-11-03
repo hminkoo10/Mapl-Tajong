@@ -296,5 +296,6 @@ def format_duration(sec):
         return "-"
     if sec < 60:
         return f"{sec:.1f}초"
-    m, s = divmod(int(round(sec)), 60)
-    return f"{m}:{s:02d}"
+    h, rem = divmod(int(round(sec)), 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"

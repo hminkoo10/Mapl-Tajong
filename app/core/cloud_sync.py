@@ -9,8 +9,12 @@
     logs/<기기 ID>.json    그 기기가 남긴 기록 (자기 파일만 씀)
 
 파일마다 두 가지를 기억해서 주고받기가 되풀이되지 않게 한다.
-    _seen[파일]   : 마지막으로 읽거나 쓴 파일 내용 (meta 제외)
+    _seen[파일]   : 마지막으로 읽거나 쓴 파일 내용 (meta·sig 제외)
     _synced[파일] : 그때 이 기기 DB 로 만든 내용 → 이것과 다를 때만 쓴다
+
+통합 클라우드가 키(MAGOEDU_DATA_KEY)를 주면 config.json·state.json 에 서명해서 쓰고(data_sign),
+서명이 없거나 맞지 않는 파일(앱 밖에서 바꿈)은 적용하지 않고 이 기기 것을 다시 써서 되돌린다.
+서명하기 전 버전이 쓴 파일은 이 기기에서 이 계정의 그 파일에 처음 서명하기 전까지만 받는다 (DB 설정 data_signed_<config|state>).
 
 SQLite 는 화면 스레드에서만 쓰므로 이 모듈도 모두 화면 스레드(QTimer, QFileSystemWatcher)에서 돈다.
 """
@@ -26,9 +30,9 @@ from pathlib import Path
 
 from PyQt6.QtCore import QFileSystemWatcher, QObject, Qt, QTimer, pyqtSignal
 
-from app.core import backup
+from app.core import backup, data_sign
 from app.core.sound_files import copy_atomic, remove_leftover_tmp
-from app.core.paths import asset_path, backups_dir, db_path, legacy_data_dir, sound_file_path, sync_dir
+from app.core.paths import app_data_dir, asset_path, backups_dir, db_path, legacy_data_dir, sound_file_path, sync_dir
 from app.data import repo
 
 APP = "MaplTajong"
@@ -54,6 +58,10 @@ MAX_TRIES = 5
 POLL_MS = 30 * 1000           # 알림을 놓쳐도 30초마다 한 번 확인
 
 OLD_SETTING_KEYS = ("update_auto", "update_notified", "update_pending_version", "update_pending_notes")
+
+SIGNED_SETTING = "data_signed_"   # + config/state. "1": 이 기기에서 이 계정의 그 파일에 서명함 → 이제 서명 없는 것은 받지 않는다
+REJECTED_MSG = "앱 밖에서 바꾼 설정이라 적용하지 않았어요."
+TRUSTED, UNSIGNED, REJECTED = "trusted", "unsigned", "rejected"
 
 
 # ---------------------------------------------------------------------------
@@ -107,38 +115,44 @@ def device_identity(conn, session):
 
 
 def content_key(doc):
-    """meta 를 뺀 내용 (바뀌었는지 비교용)."""
+    """meta·sig 를 뺀 내용 (바뀌었는지 비교용)."""
     if not isinstance(doc, dict):
         return None
-    body = {k: v for k, v in doc.items() if k != "meta"}
+    body = {k: v for k, v in doc.items() if k not in ("meta", "sig")}
     return json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def read_json(path):
-    """없으면 None. 읽을 수 없거나(쓰는 중·잠김) 올바른 JSON 이 아니면 ValueError."""
+def read_json_bytes(path):
+    """(내용, 파일 바이트). 없으면 (None, None). 읽을 수 없거나(쓰는 중·잠김) 올바른 JSON 이 아니면 ValueError."""
     try:
         raw = Path(path).read_bytes()
     except FileNotFoundError:
-        return None
+        return None, None
     except OSError as e:
         raise ValueError(str(e))
     try:
-        return json.loads(raw.decode("utf-8-sig"))
+        return json.loads(raw.decode("utf-8-sig")), raw
     except Exception as e:
         raise ValueError(f"JSON 이 아니에요: {e}")
 
 
-def write_json_atomic(path, doc, compact=False):
-    """.tmp 에 쓴 뒤 이름을 바꾼다 (원자적 저장)."""
+def read_json(path):
+    """없으면 None. 읽을 수 없거나(쓰는 중·잠김) 올바른 JSON 이 아니면 ValueError."""
+    return read_json_bytes(path)[0]
+
+
+def write_json_atomic(path, doc, compact=False, key=""):
+    """.tmp 에 쓴 뒤 이름을 바꾼다 (원자적 저장). key 가 있으면 서명해서 쓴다."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     if compact:
-        text = json.dumps(doc, ensure_ascii=False, separators=(",", ":"))
+        kw = {"ensure_ascii": False, "separators": (",", ":")}
     else:
-        text = json.dumps(doc, ensure_ascii=False, indent=1)
+        kw = {"ensure_ascii": False, "indent": 1}
+    data = data_sign.dumps_signed(doc, key, **kw) if key else json.dumps(doc, **kw).encode("utf-8")
     with open(tmp, "wb") as f:
-        f.write(text.encode("utf-8"))
+        f.write(data)
         f.flush()
         os.fsync(f.fileno())
     err = None
@@ -170,6 +184,17 @@ def _meta(device_id, device_name):
 
 def _today():
     return datetime.now().strftime("%Y-%m-%d")
+
+
+def _log(kind, detail):
+    """이 기기에만 남기는 동기화 기록 (sync.log, 동기화 폴더 밖)."""
+    try:
+        p = app_data_dir() / "sync.log"
+        lines = p.read_text(encoding="utf-8").splitlines()[-200:] if p.exists() else []
+        lines.append(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {kind}: {str(detail)[:500]}")
+        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +672,8 @@ class CloudSync(QObject):
         self._remote_logs = {}     # 파일 이름 → {"sig", "device_id", "name", "rows"}
         self._sounds_sig = None
         self.watcher = None
+        self.key = data_sign.data_key()   # 없으면 서명하지 않음 (예전 통합 클라우드)
+        self._rejected_due = False
 
         self._export_timer = QTimer(self)
         self._export_timer.setSingleShot(True)
@@ -685,7 +712,7 @@ class CloudSync(QObject):
     def _initial(self, kind, prefer_local):
         path = self._paths[kind]
         try:
-            doc = read_json(path)
+            doc, trust = self._read(kind)
         except ValueError:
             self._schedule_check(RETRY_MS)   # 받는 중일 수 있음 → 조금 뒤 다른 기기 것으로 적용
             return
@@ -693,10 +720,52 @@ class CloudSync(QObject):
             self._export(kind, force=True)
             return
         self._sig[str(path)] = _sig(path)
+        if trust == REJECTED:
+            self._rejected(kind, doc)
+            return
         try:
             self._apply(kind, doc)
         except ValueError:
-            pass
+            return
+        if trust == UNSIGNED:
+            self._export(kind, force=True)   # 서명해서 다시 써 둔다 (이 뒤로는 서명 없는 파일을 받지 않음)
+
+    # ---------- 서명 ----------
+    def _read(self, kind):
+        """파일 → (내용, 확인 결과). 없으면 (None, TRUSTED). 읽을 수 없으면 ValueError.
+        TRUSTED: 서명이 맞음(서명을 쓰지 않으면 늘) / UNSIGNED: 서명하기 전 버전이 쓴 파일, 처음 서명하기 전까지만 받음
+        / REJECTED: 서명이 없거나 맞지 않음 (앱 밖에서 바꿈)"""
+        doc, raw = read_json_bytes(self._paths[kind])
+        if doc is None or not self.key:
+            return doc, TRUSTED
+        if data_sign.verify_bytes(raw, self.key):
+            self._mark_signed(kind)
+            return doc, TRUSTED
+        if isinstance(doc, dict) and "sig" not in doc and repo.get_setting(self.conn, SIGNED_SETTING + kind, "0") != "1":
+            return doc, UNSIGNED
+        return doc, REJECTED
+
+    def _mark_signed(self, kind):
+        """파일마다 따로 (config.json 을 먼저 서명해도 아직 예전 것인 state.json 은 한 번 받게)"""
+        if repo.get_setting(self.conn, SIGNED_SETTING + kind, "0") != "1":
+            repo.set_setting(self.conn, SIGNED_SETTING + kind, "1")
+
+    def _rejected(self, kind, doc, revert=True):
+        """앱 밖에서 바꾼 파일: 적용하지 않고, 이 기기 것을 다시 써서(서명) 서버 것도 되돌린다.
+        이 기기에 아직 데이터가 없으면(처음 설치) 덮어쓰지 않고 그냥 둔다."""
+        meta = doc.get("meta") if isinstance(doc, dict) else None
+        who = (meta.get("device_name") or meta.get("device_id")) if isinstance(meta, dict) else ""
+        _log("서명이 없거나 맞지 않아 적용하지 않았어요", f"{self._paths[kind].name} ({who or '모름'})")
+        if not self._rejected_due:
+            self._rejected_due = True
+            QTimer.singleShot(0, self._notify_rejected)   # 켜는 중이면 화면(알림)이 생긴 뒤에
+        if revert and self.conn.execute("SELECT 1 FROM sounds LIMIT 1").fetchone() is not None:
+            self._synced.pop(kind, None)   # 쓰지 못해서 다시 할 때도 쓰게
+            self._export(kind, force=True)
+
+    def _notify_rejected(self):
+        self._rejected_due = False
+        self.notice.emit(REJECTED_MSG, "info")
 
     # ---------- 이 기기에서 바뀜 → 내보내기 ----------
     def local_changed(self, what="all"):
@@ -749,10 +818,13 @@ class CloudSync(QObject):
         if not force:
             # 받아 두고 아직 적용하지 않은 다른 기기 변경이 있으면 그쪽이 먼저 (서버에 먼저 올라간 것이 이김)
             try:
-                disk = read_json(path)
+                disk, trust = self._read(kind)
             except ValueError:
-                disk = None
-            if disk is not None and content_key(disk) != self._seen.get(kind):
+                disk, trust = None, TRUSTED
+            if disk is not None and trust == REJECTED:
+                if content_key(disk) != self._seen.get(kind):
+                    self._rejected(kind, disk, revert=False)   # 적용하지 않고 아래에서 이 기기 것을 써서 되돌린다
+            elif disk is not None and content_key(disk) != self._seen.get(kind):
                 try:
                     self._sig[str(path)] = _sig(path)
                     applied = self._apply(kind, disk)
@@ -764,17 +836,20 @@ class CloudSync(QObject):
                     if key == self._synced.get(kind):
                         if applied:
                             self.notice.emit("다른 기기에서 먼저 바뀌어서 그 내용으로 맞췄어요", "info")
-                        return False
+                        if trust != UNSIGNED:   # 서명 없는 파일이었으면 서명해서 다시 써 둔다
+                            return False
         if kind == "state":
             self._prune_requests()
             doc = self._build(kind)
             key = content_key(doc)
         doc["meta"] = _meta(self.device_id, self.device_name)
         try:
-            write_json_atomic(path, doc)
+            write_json_atomic(path, doc, key=self.key)
         except OSError:
             QTimer.singleShot(RETRY_MS, self.local_changed)
             return False
+        if self.key:
+            self._mark_signed(kind)
         self._seen[kind] = key
         self._synced[kind] = key
         self._sig[str(path)] = _sig(path)
@@ -872,7 +947,7 @@ class CloudSync(QObject):
                 self._sig[sp] = None
                 continue
             try:
-                doc = read_json(path)
+                doc, trust = self._read(kind)
                 if doc is None:
                     continue
                 _check_head(doc, kind)
@@ -881,10 +956,15 @@ class CloudSync(QObject):
                 continue
             self._sig[sp] = sig
             self._tries.pop(sp, None)
+            if trust == REJECTED:
+                self._rejected(kind, doc)
+                continue
             try:
                 self._apply(kind, doc)
             except ValueError:
-                pass
+                continue
+            if trust == UNSIGNED:
+                self._export(kind, force=True)   # 서명해서 다시 써 둔다 (이 뒤로는 서명 없는 파일을 받지 않음)
         self._load_remote_logs()
         snd = self._sounds_listing()
         if snd != self._sounds_sig:

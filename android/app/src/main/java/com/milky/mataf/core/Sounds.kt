@@ -97,7 +97,8 @@ object Sounds {
         val s = ms / 1000.0
         if (s < 60) return "%.1f초".format(s)
         val t = s.roundToInt()
-        return "${t / 60}:%02d".format(t % 60)
+        val h = t / 3600
+        return if (h > 0) "$h:%02d:%02d".format(t % 3600 / 60, t % 60) else "${t / 60}:%02d".format(t % 60)
     }
 }
 

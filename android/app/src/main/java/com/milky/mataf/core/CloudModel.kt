@@ -68,8 +68,8 @@ object CloudModel {
             ?: runCatching { LocalDateTime.parse(t).toInstant(ZoneOffset.UTC) }.getOrNull()
     }
 
-    /** 내용 비교용 값: meta 를 뺀 정규화 JSON */
-    fun content(file: Map<String, Any?>): String = Json.canonical(file.filterKeys { it != "meta" })
+    /** 내용 비교용 값: meta·sig 를 뺀 정규화 JSON */
+    fun content(file: Map<String, Any?>): String = Json.canonical(file.filterKeys { it != "meta" && it != "sig" })
 
     fun contentHash(file: Map<String, Any?>): String = sha256(content(file))
 

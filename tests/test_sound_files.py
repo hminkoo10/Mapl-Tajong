@@ -92,5 +92,25 @@ class AtomicWriteTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.sounds.iterdir()), ["keep.wav"])
 
 
+class DurationFormatTests(unittest.TestCase):
+    def test_sound_list_shows_hours_from_one_hour(self):
+        f = sound_files.format_duration
+        self.assertEqual(f(None), "-")
+        self.assertEqual(f(5.5), "5.5초")
+        self.assertEqual(f(75.2), "1:15")
+        self.assertEqual(f(59 * 60 + 59.4), "59:59")       # 1시간 아래는 예전 그대로
+        self.assertEqual(f(3600), "1:00:00")
+        self.assertEqual(f(75 * 60 + 3), "1:15:03")        # 예전에는 75:03
+        self.assertEqual(f(10 * 3600 + 5), "10:00:05")
+
+    def test_editor_time_shows_hours_from_one_hour(self):
+        from app.ui.sound_editor import _fmt   # PyQt6 가 있어야 불러올 수 있다
+        self.assertEqual(_fmt(5.5), "5.50초")
+        self.assertEqual(_fmt(75.2), "1:15.20")
+        self.assertEqual(_fmt(59 * 60 + 59.4), "59:59.40")
+        self.assertEqual(_fmt(3600), "1:00:00.00")
+        self.assertEqual(_fmt(75 * 60 + 3.25), "1:15:03.25")
+
+
 if __name__ == "__main__":
     unittest.main()

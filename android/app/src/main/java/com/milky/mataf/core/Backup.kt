@@ -27,6 +27,7 @@ class BackupError(message: String) : RuntimeException(message)
  * 전체 백업/복원과 시간표 CSV (데스크톱 app/core/backup.py 를 그대로 옮김).
  * zip = manifest.json + data.json + sounds/<파일 이름>. 데스크톱과 서로 주고받을 수 있다.
  * 다듬기 원본(originals)은 데스크톱처럼 넣지 않는다.
+ * 서버가 서명 키를 주면(Cloud.signingKey) data.json 에 서명하고, 서명이 없거나 맞지 않는 백업은 불러오지 않는다 (DataSign).
  * 파일을 읽고 쓰므로 IO 스레드에서 부른다. 넘겨받은 스트림은 다 쓰고 닫는다.
  */
 object Backup {
@@ -34,6 +35,7 @@ object Backup {
     private const val APP = "MaplTajong"
     private const val NOT_BACKUP = "타종 프로그램 백업 파일이 아닙니다."
     private const val TOO_NEW = "더 최신 버전에서 만든 백업입니다. 프로그램을 업데이트해 주세요."
+    private const val TAMPERED = "이 백업 파일은 프로그램 밖에서 바뀌었거나 예전 형식이라 불러올 수 없어요."
 
     /** 옮기는 표와 열 (넣는 순서도 데스크톱과 같다: 종소리 → 세트 → 일정) */
     private val TABLES = linkedMapOf(
@@ -70,13 +72,16 @@ object Backup {
         })
         val counts = TABLES.keys.associateWith { data.getJSONArray(it).length() }
         val createdAt = LocalDateTime.now().format(STAMP)
+        val key = Cloud.signingKey()
+        if (key != null) data.put("sig", DataSign.ZERO)
         val manifest = JSONObject().apply {
             put("app", APP); put("format", FORMAT); put("app_version", BuildConfig.VERSION_NAME); put("created_at", createdAt)
             put("counts", JSONObject().apply { counts.forEach { (k, v) -> put(k, v) } })
         }
         ZipOutputStream(out.buffered()).use { z ->
             z.putNextEntry(ZipEntry("manifest.json")); z.write(manifest.toString(2).toByteArray()); z.closeEntry()
-            z.putNextEntry(ZipEntry("data.json")); z.write(data.toString(2).toByteArray()); z.closeEntry()
+            val dataBytes = data.toString(2).toByteArray(Charsets.UTF_8)
+            z.putNextEntry(ZipEntry("data.json")); z.write(if (key != null) DataSign.sign(dataBytes, key) else dataBytes); z.closeEntry()
             val sounds = data.getJSONArray("sounds")
             val done = mutableSetOf<String>()
             for (i in 0 until sounds.length()) {
@@ -91,14 +96,29 @@ object Backup {
     }
 
     /** 타종 백업인지 확인하고 manifest 를 돌려준다 (불러오기 전 확인 창용). 아니면 BackupError */
-    fun readManifest(input: InputStream): Manifest = parseManifest(try {
-        ZipInputStream(input.buffered()).use { z ->
-            val e = generateSequence<ZipEntry> { z.nextEntry }.firstOrNull { it.name == "manifest.json" }
-            if (e == null) null else String(z.readBytes(), Charsets.UTF_8)
-        }
-    } catch (e: Exception) {
-        null
-    })
+    fun readManifest(input: InputStream): Manifest {
+        val key = Cloud.signingKey()
+        var data: ByteArray? = null
+        val m = parseManifest(try {
+            ZipInputStream(input.buffered()).use { z ->
+                var text: String? = null
+                for (e in generateSequence<ZipEntry> { z.nextEntry }) {
+                    if (e.name == "manifest.json") text = String(z.readBytes(), Charsets.UTF_8)
+                    else if (e.name == "data.json" && key != null) data = z.readBytes()   // 서명도 확인 창 전에 본다
+                    if (text != null && (key == null || data != null)) break
+                }
+                text
+            }
+        } catch (e: Exception) {
+            null
+        })
+        if (key != null) checkSig(data ?: ByteArray(0), key)
+        return m
+    }
+
+    private fun checkSig(raw: ByteArray, key: String) {
+        if (!DataSign.verify(raw, key)) throw BackupError(TAMPERED)
+    }
 
     /**
      * 지금 시간표·세트·종소리를 백업 내용으로 바꾼다. 기록·쉬는 날·다른 설정은 그대로 둔다.
@@ -112,7 +132,9 @@ object Backup {
             val zip = try { ZipFile(tmp) } catch (e: Exception) { throw BackupError(NOT_BACKUP) }
             val data = zip.use { z ->
                 parseManifest(try { z.text("manifest.json") } catch (e: Exception) { null })
-                val d = try { JSONObject(z.text("data.json")!!) } catch (e: Exception) { throw BackupError(NOT_BACKUP) }
+                val raw = try { z.bytes("data.json")!! } catch (e: Exception) { throw BackupError(NOT_BACKUP) }
+                Cloud.signingKey()?.let { checkSig(raw, it) }
+                val d = try { JSONObject(String(raw, Charsets.UTF_8)) } catch (e: Exception) { throw BackupError(NOT_BACKUP) }
                 beforeReplaceFiles()
                 val sounds = d.optJSONArray("sounds") ?: JSONArray()
                 for (i in 0 until sounds.length()) {
@@ -241,6 +263,8 @@ object Backup {
 
     private fun ZipFile.text(name: String): String? =
         getEntry(name)?.let { e -> getInputStream(e).use { String(it.readBytes(), Charsets.UTF_8) } }
+
+    private fun ZipFile.bytes(name: String): ByteArray? = getEntry(name)?.let { e -> getInputStream(e).use { it.readBytes() } }
 
     /** 데스크톱 csv 모듈(excel)과 같게: 쉼표·따옴표·줄바꿈이 있을 때만 따옴표로 감싼다 */
     private fun csvField(s: String) =

@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT))
 
 from PyQt6.QtCore import QCoreApplication  # noqa: E402
 
-from app.core import cloud_sync, paths  # noqa: E402
+from app.core import cloud_sync, data_sign, paths  # noqa: E402
 from app.core.scheduler import NextEvent, Scheduler  # noqa: E402
 from app.data import repo  # noqa: E402
 from app.data.db import init_schema  # noqa: E402
@@ -711,6 +711,181 @@ class FirstConnectionTests(Base):
         conn, prefer_local = cloud_sync.open_database(SCHEMA, ask_choice=lambda: self.fail("묻지 않아야 함"))
         self.assertFalse(prefer_local)
         conn.close()
+
+
+KEY = "Zm9vYmFyLWtleS1mb3ItdGVzdHMtb25seS0xMjM0NTY3OA"
+
+
+class SigningTests(Base):
+    """통합 클라우드가 키(MAGOEDU_DATA_KEY)를 줄 때: 서명해서 쓰고, 앱 밖에서 바꾼 파일은 적용하지 않는다."""
+
+    def setUp(self):
+        super().setUp()
+        env = mock.patch.dict(os.environ, {data_sign.KEY_ENV: KEY})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def raw(self, name):
+        return (self.data / name).read_bytes()
+
+    def signed(self, name):
+        return data_sign.verify_bytes(self.raw(name), KEY)
+
+    def hand_edit(self, name, old, new):
+        p = self.data / name
+        text = p.read_text(encoding="utf-8")
+        self.assertIn(old, text)
+        p.write_text(text.replace(old, new), encoding="utf-8")
+
+    def flag(self, dev):
+        return "".join(repo.get_setting(dev.conn, cloud_sync.SIGNED_SETTING + k, "0") for k in ("config", "state"))
+
+    def two_devices(self):
+        a = Device(self.data, "devA", "A")
+        fill_sample(a.conn)
+        a.start()
+        b = Device(self.data, "devB", "B").start()
+        return a, b
+
+    def test_files_are_signed_and_applied(self):
+        a, b = self.two_devices()
+        self.assertTrue(self.signed("config.json"))
+        self.assertTrue(self.signed("state.json"))
+        self.assertEqual(self.flag(a), "11")
+        self.assertEqual(self.flag(b), "11")                # 서명이 맞는 파일을 읽음
+        self.assertIn("all", b.applied)
+        self.assertEqual([int(r["id"]) for r in repo.list_schedules(b.conn, 3)], [7, 9])
+        self.assertFalse(b.sync._export("config"))          # sig·meta 만 다르면 다시 쓰지 않음
+        self.assertFalse(b.sync._export("state"))
+        self.assertFalse(data_sign.verify_bytes(self.raw(f"logs/{a.sync.device_id}.json"), KEY))   # 기록은 서명 안 함
+
+    def test_hand_edited_config_rejected_and_reverted(self):
+        a, b = self.two_devices()
+        notices = []
+        b.sync.notice.connect(lambda t, k: notices.append(t))
+        self.hand_edit("config.json", '"1교시"', '"손으로 고친 교시"')
+        b.sync.check_files()
+        self.assertEqual(repo.get_schedules(b.conn, [7])[0]["name"], "1교시")   # 적용하지 않음
+        doc = self.read("config.json")                       # 이 기기 것으로 되돌려 씀 (서명)
+        self.assertEqual(doc["schedules"][0]["name"], "1교시")
+        self.assertEqual(doc["meta"]["device_id"], "devB")
+        self.assertTrue(self.signed("config.json"))
+        pump(0.05)
+        self.assertEqual(notices, [cloud_sync.REJECTED_MSG])
+        self.assertIn("config.json", (self.local / "sync.log").read_text(encoding="utf-8"))
+        # 되돌린 파일은 다른 기기가 그대로 받는다 (바뀐 것 없음)
+        a.sync.check_files()
+        self.assertEqual(repo.get_schedules(a.conn, [7])[0]["name"], "1교시")
+        # 서명을 지운 파일도 (이미 서명한 뒤라) 받지 않는다
+        doc = self.read("config.json")
+        del doc["sig"]
+        doc["schedules"][0]["name"] = "서명 지움"
+        self.write("config.json", doc)
+        b.sync.check_files()
+        self.assertEqual(repo.get_schedules(b.conn, [7])[0]["name"], "1교시")
+        self.assertTrue(self.signed("config.json"))
+
+    def test_hand_edited_state_rejected_and_reverted(self):
+        a, b = self.two_devices()
+        self.hand_edit("state.json", '"paused": false', '"paused": true')
+        b.sync.check_files()
+        self.assertFalse(b.sch.paused)
+        self.assertEqual(repo.get_setting(b.conn, "paused", "0"), "0")
+        self.assertFalse(self.read("state.json")["paused"])
+        self.assertTrue(self.signed("state.json"))
+        # 앱에서 바꾼 것은 그대로 맞춰진다
+        a.sch.pause()
+        a.sync.export_now()
+        b.sync.check_files()
+        self.assertTrue(b.sch.paused)
+
+    def test_hand_edit_rejected_at_start_and_before_local_write(self):
+        a, b = self.two_devices()
+        b.sync.flush()
+        self.hand_edit("config.json", '"2교시"', '"켜기 전에 고침"')
+        b2 = Device(self.data, "devB", "B", conn=b.conn).start()   # 다시 켤 때
+        self.assertEqual(repo.get_schedules(b2.conn, [9])[0]["name"], "2교시")
+        self.assertEqual(self.read("config.json")["schedules"][1]["name"], "2교시")
+        self.assertTrue(self.signed("config.json"))
+        # 이 기기에서 바꾸는 사이에 손으로 고친 파일이 오면: 적용하지 않고 이 기기 것을 쓴다
+        self.hand_edit("config.json", '"1교시"', '"쓰기 전에 고침"')
+        repo.update_sound(b2.conn, 5, "새 이름", 1.0)
+        self.assertTrue(b2.sync._export("config"))
+        doc = self.read("config.json")
+        self.assertEqual(doc["schedules"][0]["name"], "1교시")
+        self.assertEqual(doc["sounds"][0]["name"], "새 이름")
+        self.assertTrue(self.signed("config.json"))
+
+    def test_unsigned_accepted_once_before_flag(self):
+        old = Device(self.data, "old", "예전 버전 PC")       # 서명하기 전 버전
+        old.sync.key = ""
+        fill_sample(old.conn)
+        old.start()
+        self.assertNotIn("sig", self.read("config.json"))
+        b = Device(self.data, "devB", "B")
+        self.assertEqual(self.flag(b), "00")
+        b.start()                                            # 처음 한 번은 예전처럼 받는다
+        self.assertEqual([int(r["id"]) for r in repo.list_schedules(b.conn, 3)], [7, 9])
+        self.assertTrue(self.signed("config.json"))          # 받은 것을 서명해서 다시 써 둠
+        self.assertTrue(self.signed("state.json"))
+        self.assertEqual(self.flag(b), "11")
+        # 이제 서명 없는 파일은 받지 않고 되돌린다
+        repo.update_schedule(old.conn, 7, "예전 버전에서 바꿈", 127, "23:58", 5, None, 1)
+        old.sync.export_now()
+        self.assertNotIn("sig", self.read("config.json"))
+        b.sync.check_files()
+        self.assertEqual(repo.get_schedules(b.conn, [7])[0]["name"], "1교시")
+        self.assertEqual(self.read("config.json")["schedules"][0]["name"], "1교시")
+        self.assertTrue(self.signed("config.json"))
+        # 서명한 파일은 예전 버전도 그대로 읽는다 (sig 는 모르는 칸)
+        old.sync.check_files()
+        self.assertEqual(repo.get_schedules(old.conn, [7])[0]["name"], "1교시")
+
+    def test_fresh_install_does_not_overwrite(self):
+        a = Device(self.data, "devA", "A")
+        fill_sample(a.conn)
+        a.start()
+        self.hand_edit("config.json", '"1교시"', '"고친 교시"')
+        before = self.raw("config.json")
+        fresh = Device(self.data, "devC", "새 PC").start()   # 이 기기에 아직 아무것도 없음
+        self.assertEqual(fresh.conn.execute("SELECT COUNT(*) FROM schedules").fetchone()[0], 0)
+        self.assertEqual(self.raw("config.json"), before)    # 덮어쓰지 않음
+
+    def test_automatic_backup_is_signed(self):
+        legacy = Path(os.environ["APPDATA"]) / "MaplTajong"
+        (legacy / "sounds").mkdir(parents=True)
+        conn = new_db(legacy / "tajong.db")
+        fill_sample(conn)
+        conn.close()
+        other = new_db()
+        other.execute("INSERT INTO sounds(id, name, file_name, volume) VALUES(1, 'bell2', 'bell2.wav', 1.0)")
+        other.commit()
+        doc = cloud_sync.build_config(other)
+        doc["meta"] = {"device_id": "phone", "device_name": "폰", "at": cloud_sync.utc_iso()}
+        cloud_sync.write_json_atomic(self.data / "config.json", doc, key=KEY)
+        conn, _ = cloud_sync.open_database(SCHEMA, ask_choice=lambda: "cloud")
+        zips = list((self.local / "backups").glob("*.zip"))
+        self.assertEqual(len(zips), 1)
+        with zipfile.ZipFile(zips[0]) as z:
+            self.assertTrue(data_sign.verify_bytes(z.read("data.json"), KEY))
+        conn.close()
+
+    def test_signing_off_is_old_behaviour(self):
+        with mock.patch.dict(os.environ, {data_sign.KEY_ENV: ""}):
+            a, b = self.two_devices()
+        self.assertNotIn("sig", self.read("config.json"))
+        self.assertNotIn("sig", self.read("state.json"))
+        self.hand_edit("config.json", '"1교시"', '"손으로 고친 교시"')
+        b.sync.check_files()
+        self.assertEqual(repo.get_schedules(b.conn, [7])[0]["name"], "손으로 고친 교시")   # 예전처럼 적용
+        self.assertEqual(self.flag(b), "00")
+        # 서명을 쓰는 기기가 쓴 파일도 그대로 받는다
+        c = Device(self.data, "devC", "C")
+        fill_sample(c.conn)
+        c.start(prefer_local=True)
+        self.assertTrue(self.signed("config.json"))
+        b.sync.check_files()
+        self.assertEqual(repo.get_schedules(b.conn, [7])[0]["name"], "1교시")
 
 
 if __name__ == "__main__":

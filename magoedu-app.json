@@ -2,6 +2,7 @@
   "format": 1,
   "id": "tajong",
   "exe": "Mataf.exe",
+  "dataSigning": true,
   "sync": {
     "include": ["config.json", "state.json", "sounds/**", "logs/**"],
     "exclude": ["**/*.tmp"]

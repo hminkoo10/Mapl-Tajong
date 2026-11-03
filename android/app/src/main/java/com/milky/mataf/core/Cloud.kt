@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import com.milky.mataf.BuildConfig
 import com.milky.mataf.core.CloudModel.Base
 import com.milky.mataf.core.CloudModel.Entry
@@ -44,6 +45,10 @@ import javax.crypto.spec.GCMParameterSpec
  * 마고에듀 통합 클라우드 동기화 (docs/cloud-sync.md 의 안드로이드 쪽).
  *
  * - 로그인 정보: 서버 주소·아이디·이름은 설정 표, 세션 토큰은 Android Keystore 키로 암호화해서 설정 표(`cloud_token`)에.
+ *   설정 파일 서명 키(서버가 줌, DataSign)도 토큰처럼 암호화해서 설정 표(`cloud_data_key`)에.
+ * - 서버가 키를 주면 config.json·state.json 을 서명해서 올리고, 서명이 없거나 맞지 않는 파일(앱 밖에서 바꿈)은 적용하지 않고
+ *   이 기기 것을 다시 올려 되돌린다. 서명하기 전 버전이 올린 파일은 이 기기에서 그 파일에 처음 서명하기 전까지만 받는다
+ *   (SharedPreferences `cloud_signing`, 서버·아이디·파일마다).
  * - 동기화 상태(seq, 파일마다 rev/sha, 마지막으로 맞춘 내용): `filesDir/cloud/sync.json`, 다른 기기 기록: `filesDir/cloud/logs/`.
  * - 모든 동기화 일은 한 줄로(작업자 코루틴 하나 + Mutex) 한다. 데이터가 바뀌면 잠시 모았다가(시간표 1초, 기록 5초) 올린다.
  */
@@ -56,7 +61,11 @@ object Cloud {
     private const val K_NAME = "cloud_name"
     private const val K_TOKEN = "cloud_token"
     private const val K_LAST_SYNC = "cloud_last_sync"
+    private const val K_DATA_KEY = "cloud_data_key"
+    private const val SIGNING_PREFS = "cloud_signing"
+    private const val TAG = "Cloud"
     const val CONFLICT_MSG = "다른 기기에서 먼저 바뀌어서 그 내용으로 맞췄어요"
+    const val REJECTED_MSG = "앱 밖에서 바꾼 설정이라 적용하지 않았어요."
     private const val RETRY_MS = 30_000L
 
     enum class Conn { OFF, CONNECTING, ONLINE, POLLING, OFFLINE }
@@ -88,6 +97,13 @@ object Cloud {
 
     @Volatile private var token: String? = null
     @Volatile private var server: String = DEFAULT_SERVER
+    /** 설정 파일 서명 키 (null = 서명하지 않음: 예전 서버). 켠 뒤·로그인한 뒤 처음 동기화할 때 서버에 물어본다 */
+    @Volatile private var dataKey: String? = null
+    @Volatile private var keyChecked = false
+    /** 서명해서 다시 올릴 파일 (서명 없는 예전 파일을 받았거나, 앱 밖에서 바꾼 파일을 되돌릴 때) */
+    private val resign = HashSet<String>()
+    /** 받지 않은 파일의 rev (같은 것을 되풀이해서 알리지 않게) */
+    private val rejected = HashMap<String, Long>()
     private var sync: SyncState? = null
     private var pendingRemote: Pair<Map<String, Any?>, Entry>? = null
     private val due = HashMap<Work, Long>()
@@ -103,6 +119,7 @@ object Cloud {
         server = repo.setting(K_SERVER, DEFAULT_SERVER).ifBlank { DEFAULT_SERVER }
         val saved = repo.setting(K_TOKEN, "")
         token = Secret.decrypt(saved)
+        dataKey = Secret.decrypt(repo.setting(K_DATA_KEY, ""))
         _status.value = Status(
             loggedIn = token != null, server = server, username = repo.setting(K_USERNAME, ""), name = repo.setting(K_NAME, ""),
             lastSync = repo.setting(K_LAST_SYNC, "").toLongOrNull() ?: 0,
@@ -115,6 +132,9 @@ object Cloud {
     }
 
     fun isLoggedIn(): Boolean = token != null
+
+    /** 백업 파일 서명에 쓰는 키 (없으면 서명하지 않음) */
+    fun signingKey(): String? = dataKey
 
     fun credentials(): Pair<String, String>? = token?.let { server to it }
 
@@ -232,6 +252,7 @@ object Cloud {
         _status.value = _status.value.copy(syncing = true)
         problem = null
         try {
+            ensureDataKey(api)
             val full = Work.FULL in ready
             if (full || Work.PULL in ready) pull(api, st)
             if (full || Work.CONFIG in ready) step { exportConfig(api, st) }
@@ -267,6 +288,63 @@ object Cloud {
         }
     }
 
+    // ---------------------------------------------------------------- 서명
+    /** 서버에 서명 키를 물어본다 (켠 뒤·로그인한 뒤 한 번). 404 = 예전 서버 → 서명하지 않음 */
+    private fun ensureDataKey(api: CloudApi) {
+        if (keyChecked) return
+        val k = try {
+            api.dataKey()
+        } catch (e: CloudError) {
+            if (e.status != 404) {
+                if (dataKey != null) return    // 저장해 둔 키로 하고 다음에 다시 물어본다
+                throw e                        // 키를 모르는 채로 올리면 다른 기기가 되돌리니 기다린다
+            }
+            null
+        }
+        dataKey = k
+        keyChecked = true
+        Repo(app).setSetting(K_DATA_KEY, k?.let { Secret.encrypt(it) } ?: "")
+    }
+
+    private fun signingPrefs() = app.getSharedPreferences(SIGNING_PREFS, Context.MODE_PRIVATE)
+
+    private fun signedName(path: String) = "$server|${Repo(app).setting(K_USERNAME, "")}|$path"
+
+    private fun signedBefore(path: String) = signingPrefs().getBoolean(signedName(path), false)
+
+    private fun markSigned(path: String) {
+        if (!signedBefore(path)) signingPrefs().edit().putBoolean(signedName(path), true).apply()
+    }
+
+    /** 올릴 config.json·state.json 내용: 키가 있으면 서명해서 */
+    private fun fileBytes(m: Map<String, Any?>): ByteArray =
+        dataKey?.let { DataSign.signedJson(m, it) } ?: Json.write(m).toByteArray(Charsets.UTF_8)
+
+    private fun uploaded(path: String) {
+        resign.remove(path)
+        if (dataKey != null) markSigned(path)
+    }
+
+    /** 서명해서 다시 올린다 */
+    private fun resignLater(path: String) {
+        resign.add(path)
+        schedule(if (path == CloudModel.CONFIG) Work.CONFIG else Work.STATE, 0)
+    }
+
+    /**
+     * 서명이 없거나 맞지 않는 파일(앱 밖에서 바꿈): 적용하지 않고 이 기기 것을 다시 올려 서버 것도 되돌린다.
+     * 이 계정과 아직 맞춘 적이 없으면(처음 연결) 덮어쓰지 않고 그냥 둔다.
+     */
+    private fun rejectRemote(st: SyncState, path: String, r: Entry) {
+        if (rejected.put(path, r.rev) != r.rev) {
+            Log.w(TAG, "$path (rev ${r.rev}): 서명이 없거나 맞지 않아 적용하지 않았어요")
+            Toasts.show(REJECTED_MSG, "info")
+        }
+        if (st.base[path] == null) return
+        st.base[path] = Base(r.rev, r.sha)
+        resignLater(path)
+    }
+
     // ---------------------------------------------------------------- 받기
     private fun pull(api: CloudApi, st: SyncState) {
         val res = api.list(st.seq)
@@ -281,14 +359,20 @@ object Cloud {
         val localCfg = buildConfig(repo)
         val localHash = CloudModel.contentHash(localCfg)
         val need = rc != null && rc.live && (bc == null || bc.rev != rc.rev)
-        val remoteCfg = if (need) fetchJson(api, CloudModel.CONFIG, rc!!)?.takeIf { CloudModel.isConfig(it) } else null
-        val decision = if (need && remoteCfg == null) {
+        val fetched = if (need) fetchJson(api, CloudModel.CONFIG, rc!!)?.takeIf { CloudModel.isConfig(it.first) } else null
+        val remoteCfg = fetched?.takeIf { it.second != DataSign.Trust.REJECTED }?.first
+        val decision = if (fetched?.second == DataSign.Trust.REJECTED) {
+            rejectRemote(st, CloudModel.CONFIG, rc!!)
+            Pull.NONE
+        } else if (need && remoteCfg == null) {
             setMessage("클라우드의 시간표 파일을 읽지 못했어요.")
             Pull.NONE
         } else {
             CloudModel.decideConfig(bc, rc, localHash, st.lastConfig, remoteCfg?.let { CloudModel.contentHash(it) },
                 CloudModel.isDefaultConfig(localCfg))
         }
+        // 서명하기 전 버전이 올린 것: 예전처럼 받고 서명해서 다시 올린다
+        if (fetched?.second == DataSign.Trust.UNSIGNED) resignLater(CloudModel.CONFIG)
         if (decision != Pull.ASK && _choice.value != null && st.base[CloudModel.CONFIG] == null && decision != Pull.NONE) {
             _choice.value = null; pendingRemote = null
         }
@@ -319,9 +403,15 @@ object Cloud {
         pullLogs(api, st)
     }
 
-    /** 내용을 받아 JSON 으로 (없어졌거나 깨졌으면 null) */
-    private fun fetchJson(api: CloudApi, path: String, e: Entry): Map<String, Any?>? = try {
-        Json.parse(String(api.downloadBytes(path, e.sha), Charsets.UTF_8)).jObj()
+    /** 내용을 받아 JSON 과 서명 확인 결과로 (없어졌거나 깨졌으면 null) */
+    private fun fetchJson(api: CloudApi, path: String, e: Entry): Pair<Map<String, Any?>, DataSign.Trust>? = try {
+        val bytes = api.downloadBytes(path, e.sha)
+        Json.parse(String(bytes, Charsets.UTF_8)).jObj()?.let { doc ->
+            val key = dataKey
+            val trust = DataSign.trust(bytes, doc, key, signedBefore(path))
+            if (trust == DataSign.Trust.OK && key != null) markSigned(path)
+            doc to trust
+        }
     } catch (err: CloudError) {
         if (err.status == 404 || err.status == 410) null else throw err
     } catch (err: Json.ParseError) {
@@ -401,8 +491,13 @@ object Cloud {
         val local = buildState(repo, st.requests)
         val localHash = CloudModel.contentHash(local)
         val need = rs != null && rs.live && (bs == null || bs.rev != rs.rev)
-        val remote = if (need) fetchJson(api, CloudModel.STATE, rs!!)?.takeIf { CloudModel.isState(it) } else null
-        if (need && remote == null) return
+        val fetched = if (need) fetchJson(api, CloudModel.STATE, rs!!)?.takeIf { CloudModel.isState(it.first) } else null
+        if (need && fetched == null) return
+        if (fetched?.second == DataSign.Trust.REJECTED) {
+            rejectRemote(st, CloudModel.STATE, rs!!); return
+        }
+        if (fetched?.second == DataSign.Trust.UNSIGNED) resignLater(CloudModel.STATE)
+        val remote = fetched?.first
         when (CloudModel.decideState(bs, rs, localHash, st.lastState, remote?.let { CloudModel.contentHash(it) })) {
             Pull.RECORD -> {
                 st.base[CloudModel.STATE] = Base(rs!!.rev, rs.sha)
@@ -421,7 +516,7 @@ object Cloud {
         val ids = parsed.requests.map { it.id }.toSet()
         val me = deviceId()
         val mine = CloudModel.freshRequests(st.requests.filter { it.by == me && it.id !in ids }, Instant.now())
-        fun core(m: Map<String, Any?>) = Json.canonical(m.filterKeys { it != "meta" && it != "ring_requests" })
+        fun core(m: Map<String, Any?>) = Json.canonical(m.filterKeys { it != "meta" && it != "sig" && it != "ring_requests" })
         if (core(local) != core(remote)) Toasts.show(CONFLICT_MSG, "info")
         applyState(st, parsed, rs)
         if (mine.isNotEmpty()) {
@@ -549,11 +644,11 @@ object Cloud {
         val cfg = buildConfig(repo)
         val hash = CloudModel.contentHash(cfg)
         val missing = rc == null || !rc.live
-        if (hash == st.lastConfig && !missing) return
+        if (hash == st.lastConfig && !missing && CloudModel.CONFIG !in resign) return
         val files = CloudModel.soundFiles(cfg)
         for (fn in files) uploadSound(api, st, fn)     // 종소리 파일 먼저
         val entry = try {
-            api.upload(CloudModel.CONFIG, Json.write(cfg).toByteArray(Charsets.UTF_8), rc?.rev ?: 0)
+            api.upload(CloudModel.CONFIG, fileBytes(cfg), rc?.rev ?: 0)
         } catch (e: CloudError) {
             if (e.status != 409) throw e
             e.entry?.let { st.remote[CloudModel.CONFIG] = it }
@@ -562,6 +657,7 @@ object Cloud {
         }
         st.remote[CloudModel.CONFIG] = entry
         st.base[CloudModel.CONFIG] = Base(entry.rev, entry.sha)
+        uploaded(CloudModel.CONFIG)
         val removed = CloudModel.removedSoundFiles(st.lastConfigFiles, files)
         st.lastConfig = hash
         st.lastConfigFiles = files
@@ -586,7 +682,11 @@ object Cloud {
         if (rc == null || !rc.live) {
             schedule(Work.FULL, 0); return
         }
-        val remote = fetchJson(api, CloudModel.CONFIG, rc)?.takeIf { CloudModel.isConfig(it) } ?: return
+        val (remote, trust) = fetchJson(api, CloudModel.CONFIG, rc)?.takeIf { CloudModel.isConfig(it.first) } ?: return
+        if (trust == DataSign.Trust.REJECTED) {
+            rejectRemote(st, CloudModel.CONFIG, rc); return
+        }
+        if (trust == DataSign.Trust.UNSIGNED) resignLater(CloudModel.CONFIG)
         if (CloudModel.contentHash(remote) == CloudModel.contentHash(local)) {
             st.base[CloudModel.CONFIG] = Base(rc.rev, rc.sha)
             st.lastConfig = CloudModel.contentHash(local)
@@ -625,17 +725,21 @@ object Cloud {
         }
         val repo = Repo(app)
         val missing = rs == null || !rs.live
-        if (CloudModel.contentHash(buildState(repo, st.requests)) == st.lastState && !missing) return
+        if (CloudModel.contentHash(buildState(repo, st.requests)) == st.lastState && !missing && CloudModel.STATE !in resign) return
         st.requests = CloudModel.freshRequests(st.requests, Instant.now())   // 쓸 때 10분 지난 요청은 뺀다
         val file = buildState(repo, st.requests)
         val entry = try {
-            api.upload(CloudModel.STATE, Json.write(file).toByteArray(Charsets.UTF_8), rs?.rev ?: 0)
+            api.upload(CloudModel.STATE, fileBytes(file), rs?.rev ?: 0)
         } catch (e: CloudError) {
             if (e.status != 409) throw e
             val r = e.entry ?: run { schedule(Work.FULL, 0); return }
             st.remote[CloudModel.STATE] = r
             if (!r.live) { schedule(Work.STATE, 0); return }
-            val remote = fetchJson(api, CloudModel.STATE, r)?.takeIf { CloudModel.isState(it) } ?: return
+            val (remote, trust) = fetchJson(api, CloudModel.STATE, r)?.takeIf { CloudModel.isState(it.first) } ?: return
+            if (trust == DataSign.Trust.REJECTED) {
+                rejectRemote(st, CloudModel.STATE, r); return
+            }
+            if (trust == DataSign.Trust.UNSIGNED) resignLater(CloudModel.STATE)
             if (CloudModel.contentHash(remote) == CloudModel.contentHash(file)) {
                 st.base[CloudModel.STATE] = Base(r.rev, r.sha)
                 st.lastState = CloudModel.contentHash(file)
@@ -647,6 +751,7 @@ object Cloud {
         st.remote[CloudModel.STATE] = entry
         st.base[CloudModel.STATE] = Base(entry.rev, entry.sha)
         st.lastState = CloudModel.contentHash(file)
+        uploaded(CloudModel.STATE)
     }
 
     private fun exportLogs(api: CloudApi, st: SyncState) {
@@ -799,6 +904,8 @@ object Cloud {
         synchronized(due) { due.clear() }
         _choice.value = null
         pendingRemote = null
+        resign.clear()
+        rejected.clear()
     }
 
     // ---------------------------------------------------------------- 로그인 · 로그아웃
@@ -825,6 +932,11 @@ object Cloud {
             val repo = Repo(app)
             val same = repo.setting(K_SERVER, "") == srv && repo.setting(K_USERNAME, "") == uname
             if (!same) resetLocal()
+            if (repo.setting(K_SERVER, "") != srv) {
+                dataKey = null
+                repo.setSetting(K_DATA_KEY, "")
+            }
+            keyChecked = false   // 처음 동기화할 때 서버에 서명 키를 다시 물어본다
             repo.setSetting(K_SERVER, srv)
             repo.setSetting(K_USERNAME, uname)
             repo.setSetting(K_NAME, name)

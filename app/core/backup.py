@@ -6,6 +6,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+from app.core import data_sign
 from app.core.paths import sounds_dir
 from app.core.sound_files import write_atomic
 from app.core.version import APP_VERSION
@@ -18,10 +19,18 @@ _TABLES = {
                   "enabled", "sort_order", "created_at", "updated_at"],
 }
 _SETTING_KEYS = ["active_set_id"]
+TAMPERED_MSG = "이 백업 파일은 프로그램 밖에서 바뀌었거나 예전 형식이라 불러올 수 없어요."
 
 
 class BackupError(RuntimeError):
     pass
+
+
+def _check_sig(raw):
+    """통합 클라우드가 키를 주면(서명을 씀) 서명이 맞는 data.json 만 받는다."""
+    key = data_sign.data_key()
+    if key and not data_sign.verify_bytes(raw, key):
+        raise BackupError(TAMPERED_MSG)
 
 
 def default_backup_name():
@@ -49,10 +58,14 @@ def export_backup(conn, dst, sounds_from=None):
         "counts": {t: len(v) for t, v in data.items() if isinstance(v, list)},
     }
 
+    key = data_sign.data_key()
     tmp = dst.with_suffix(dst.suffix + ".part")
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
-        z.writestr("data.json", json.dumps(data, ensure_ascii=False, indent=2))
+        if key:
+            z.writestr("data.json", data_sign.dumps_signed(data, key, ensure_ascii=False, indent=2))
+        else:
+            z.writestr("data.json", json.dumps(data, ensure_ascii=False, indent=2))
         sd = Path(sounds_from) if sounds_from else sounds_dir()
         for s in data["sounds"]:
             f = sd / s["file_name"]
@@ -77,6 +90,9 @@ def read_manifest(src):
         raise BackupError("타종 프로그램 백업 파일이 아닙니다.")
     if int(m.get("format", 0)) > FORMAT:
         raise BackupError("더 최신 버전에서 만든 백업입니다. 프로그램을 업데이트해 주세요.")
+    if data_sign.data_key():   # 불러오기 전 확인 창에서 바로 알리게
+        with zipfile.ZipFile(src) as z:
+            _check_sig(z.read("data.json") if "data.json" in z.namelist() else b"")
     return m
 
 
@@ -84,7 +100,9 @@ def import_backup(conn, src, before_replace_files=None):
     """현재 시간표/종소리를 백업 내용으로 교체한다. (로그는 유지)"""
     read_manifest(src)
     with zipfile.ZipFile(src) as z:
-        data = json.loads(z.read("data.json").decode("utf-8"))
+        raw = z.read("data.json")
+        _check_sig(raw)
+        data = json.loads(raw.decode("utf-8"))
         names = set(z.namelist())
 
         if before_replace_files:

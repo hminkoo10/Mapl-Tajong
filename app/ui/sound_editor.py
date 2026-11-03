@@ -23,6 +23,9 @@ RATE = 8000
 def _fmt(t):
     t = max(0.0, t)
     m, s = divmod(t, 60)
+    if m >= 60:
+        h, m = divmod(m, 60)
+        return f"{int(h)}:{int(m):02d}:{s:05.2f}"
     return f"{int(m)}:{s:05.2f}" if m >= 1 else f"{s:.2f}초"
 
 
@@ -313,7 +316,14 @@ class WaveformView(TickingWidget):
             p.setPen(QPen(qc(C.grey300), 1))
             p.drawLine(QPointF(x, a.bottom() + 2), QPointF(x, a.bottom() + 6))
             p.setPen(qc(C.grey400))
-            lab = f"{t:.1f}s" if step < 1 else (f"{int(t)}s" if t < 60 else f"{int(t // 60)}:{int(t % 60):02d}")
+            if step < 1:
+                lab = f"{t:.1f}s"
+            elif t < 60:
+                lab = f"{int(t)}s"
+            elif t < 3600:
+                lab = f"{int(t // 60)}:{int(t % 60):02d}"
+            else:
+                lab = f"{int(t // 3600)}:{int(t % 3600 // 60):02d}:{int(t % 60):02d}"
             p.drawText(QRectF(x - 30, a.bottom() + 6, 60, 16), Qt.AlignmentFlag.AlignCenter, lab)
             t += step
 

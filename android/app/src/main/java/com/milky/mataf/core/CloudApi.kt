@@ -100,6 +100,9 @@ class CloudApi(val server: String, private val token: String?) {
         call(req("/api/auth/logout").post("{}".toRequestBody(JSON_TYPE)).build()) { }
     }
 
+    /** 설정 파일 서명 키 { dataKey } (DataSign). 예전 서버는 404 */
+    fun dataKey(): String? = call(req("/api/me/data-key").get().build()) { r -> jsonOf(r)["dataKey"].jStr()?.takeIf { it.isNotEmpty() } }
+
     // ---------------------------------------------------------------- 동기화
     private fun fileQ(path: String) = "/api/sync/${CloudModel.APP_ID}/file?path=${enc(path)}"
 
