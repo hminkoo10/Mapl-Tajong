@@ -1,0 +1,14 @@
+{
+ "app": "MaplTajong",
+ "kind": "state",
+ "format": 1,
+ "paused": false,
+ "overrides": [],
+ "ring_requests": [],
+ "meta": {
+  "device_id": "fixture-pc",
+  "device_name": "교무실 PC",
+  "at": "2026-11-03T12:37:54Z"
+ },
+ "sig": "1164fb97fac01d820d48dde455d45c389ad101d1e5388af9a5c5382edaf02bc8"
+}

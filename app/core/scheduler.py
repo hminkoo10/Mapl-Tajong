@@ -120,10 +120,11 @@ class Scheduler:
             return None
         s = rows[0]
         now = datetime.now()
-        run_at = self._next_run_of(s, now) or now
-        ev = NextEvent(int(s["id"]), str(s["name"]), run_at, str(s["sound_name"]), str(s["sound_file_name"]),
+        run_at = self._next_run_of(s, now)
+        ev = NextEvent(int(s["id"]), str(s["name"]), run_at or now, str(s["sound_name"]), str(s["sound_file_name"]),
                        _volume_of(s))
-        repo.add_override(self.conn, self._date_of(ev), ev.schedule_id, "FIRED_ONCE", "forced")
+        if run_at is not None:
+            repo.add_override(self.conn, self._date_of(ev), ev.schedule_id, "FIRED_ONCE", "forced")
         self.recompute_next()
         return ev
 
@@ -136,15 +137,21 @@ class Scheduler:
         ev = NextEvent(None, "", datetime.now(), str(sound["name"]), str(sound["file_name"]), float(sound["volume"]))
         self._ring(ev, forced=True, detail=detail, raise_on_error=True)
 
-    @staticmethod
-    def _next_run_of(s, now):
+    def _next_run_of(self, s, now):
         """그 일정이 다음에 울릴 때 (8일 안에 없으면 None)"""
+        ov = repo.overrides_between(self.conn, now.strftime("%Y-%m-%d"),
+                                    (now + timedelta(days=7)).strftime("%Y-%m-%d"))
         for day_offset in range(0, 8):
             base = (now + timedelta(days=day_offset)).replace(hour=0, minute=0, second=0, microsecond=0)
             if (int(s["weekday_mask"]) & weekday_bit(base)) == 0:
                 continue
             run_at = next_dt(base, str(s["time_hhmm"]))
             if day_offset == 0 and run_at <= now:
+                continue
+            date_str = base.strftime("%Y-%m-%d")
+            if "PAUSE_DAY" in ov.get((date_str, 0), ()):
+                continue
+            if {"SKIP_ONCE", "FIRED_ONCE"}.intersection(ov.get((date_str, int(s["id"])), ())):
                 continue
             return run_at
         return None
@@ -223,6 +230,8 @@ class Scheduler:
             base = (now + timedelta(days=day_offset)).replace(hour=0, minute=0, second=0, microsecond=0)
             date_str = base.strftime("%Y-%m-%d")
             day_bit = weekday_bit(base)
+            if "PAUSE_DAY" in ov.get((date_str, 0), ()):
+                continue
 
             for s in schedules:
                 if int(s["enabled"]) != 1:

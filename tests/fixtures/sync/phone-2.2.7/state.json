@@ -1,0 +1,24 @@
+{
+  "app": "MaplTajong",
+  "kind": "state",
+  "format": 1,
+  "paused": true,
+  "overrides": [],
+  "ring_requests": [
+    {
+      "id": "ac22e920-8937-4bc9-a2bd-5f83667d0975",
+      "schedule_id": null,
+      "sound_id": 1,
+      "at": "2026-11-03T12:37:54Z",
+      "ring_at": "2026-11-03T12:37:57.257Z",
+      "by": "00000000-0000-4000-8000-000000000001",
+      "by_name": "Test Phone"
+    }
+  ],
+  "meta": {
+    "device_id": "00000000-0000-4000-8000-000000000001",
+    "device_name": "Test Phone",
+    "at": "2026-11-03T12:37:54Z"
+  },
+  "sig": "ab344f564d17e263c4fcfa8612c0b9e279c57a9a8d4db8b8775665b88a115435"
+}
