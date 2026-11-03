@@ -51,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.milky.mataf.R
 import com.milky.mataf.core.Cloud
@@ -65,6 +66,7 @@ import java.io.File
 import com.milky.mataf.ui.components.ConfirmDialog
 import com.milky.mataf.ui.components.ToastHost
 import com.milky.mataf.ui.components.isWide
+import com.milky.mataf.ui.components.toastBottomInset
 import com.milky.mataf.ui.screens.Changelog
 import com.milky.mataf.ui.screens.ChangelogSheet
 import com.milky.mataf.ui.screens.CloudChoiceDialog
@@ -117,6 +119,7 @@ fun App() {
 private fun Main() {
     var tab by rememberSaveable { mutableStateOf(Tab.Home) }
     var sub by remember { mutableStateOf<Sub?>(null) }
+    var scheduleSelectionBarHeight by remember { mutableStateOf(0.dp) }
     val wide = isWide()
     val holder = rememberSaveableStateHolder()
 
@@ -135,7 +138,9 @@ private fun Main() {
                 AnimatedContent(sub ?: tab, transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(120)) },
                     label = "page") { page ->
                     when (page) {
-                        is Tab -> holder.SaveableStateProvider(page.name) { TabPage(page) { sub = it } }
+                        is Tab -> holder.SaveableStateProvider(page.name) {
+                            TabPage(page, { sub = it }) { scheduleSelectionBarHeight = it }
+                        }
                         is Sub.Search -> SearchScreen(onClose = { sub = null }, onEdit = { sub = Sub.Edit(it) })
                         is Sub.Edit -> SoundEditorScreen(page.target) { sub = null }
                         else -> {}
@@ -154,16 +159,17 @@ private fun Main() {
                 BottomBar(tab, select)
             }
         }
-        ToastHost(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (wide) 8.dp else 68.dp))
+        ToastHost(Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+            .padding(bottom = toastBottomInset(wide, scheduleSelectionBarHeight)))
     }
 }
 
 @Composable
-private fun TabPage(tab: Tab, open: (Sub) -> Unit) {
+private fun TabPage(tab: Tab, open: (Sub) -> Unit, onSelectionBarHeightChanged: (Dp) -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     when (tab) {
         Tab.Home -> HomeScreen()
-        Tab.Schedules -> SchedulesScreen()
+        Tab.Schedules -> SchedulesScreen(onSelectionBarHeightChanged = onSelectionBarHeightChanged)
         Tab.Sounds -> SoundsScreen(onSearch = { open(Sub.Search) }, onEdit = { open(Sub.Edit(it.toTarget(ctx))) })
         Tab.Logs -> LogsScreen()
         Tab.Settings -> SettingsScreen()

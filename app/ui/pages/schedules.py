@@ -41,6 +41,7 @@ class _SelectionBar(QWidget):
 
     def __init__(self, host):
         super().__init__(host)
+        self.setProperty("toast_exclusion", True)
         self.host = host
         self.k = 0.0
         self._a = None

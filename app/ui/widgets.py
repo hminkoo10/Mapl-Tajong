@@ -1090,6 +1090,10 @@ class AnimatedStack(QStackedWidget):
 # 토스트
 # =====================================================================
 class _Toast(QWidget):
+    MAX_WIDTH = 620
+    TEXT_LEFT = 46
+    TEXT_RIGHT = 18
+
     def __init__(self, host, text, kind, action_text=None, on_action=None):
         super().__init__(host)
         self.text = text
@@ -1103,20 +1107,35 @@ class _Toast(QWidget):
             self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         else:
             self.setMouseTracking(True)
-        f = font(14, QFont.Weight.Medium)
-        fm = QFontMetricsF(f)
-        lines = text.split("\n")
-        w = max(fm.horizontalAdvance(l) for l in lines) + 66
+        self._font = font(14, QFont.Weight.Medium)
+        self._action_width = 0
         if action_text:
-            w += QFontMetricsF(font(14, QFont.Weight.Bold)).horizontalAdvance(action_text) + 34
-        h = max(48, int(fm.height() * len(lines) + 26))
-        self.resize(int(min(w, 620)), h)
+            self._action_width = math.ceil(QFontMetricsF(font(14, QFont.Weight.Bold)).horizontalAdvance(action_text)) + 24
+        self._text_right = self.TEXT_RIGHT + (self._action_width + 14 if action_text else 0)
+        self._fit_width()
+
+    def _fit_width(self):
+        fm = QFontMetricsF(self._font)
+        lines = self.text.split("\n")
+        natural_w = max((fm.horizontalAdvance(line) for line in lines), default=0)
+        fixed_w = self.TEXT_LEFT + self._text_right + 8
+        w = max(fixed_w + 1, min(self.MAX_WIDTH, self.parentWidget().width() - 32,
+                                math.ceil(natural_w) + fixed_w))
+        # 그릴 때와 같은 폭·줄바꿈으로 재서 긴 문구와 좁은 창에서도 잘리지 않게 한다
+        text_rect = fm.boundingRect(QRectF(0, 0, w - self.TEXT_LEFT - self._text_right - 4, 10000),
+                                   Qt.TextFlag.TextWrapAnywhere, self.text)
+        h = max(48, math.ceil(text_rect.height()) + 26)
+        self.resize(w, h)
+
+    def _text_rect(self):
+        r = QRectF(self.rect()).adjusted(2, 2, -2, -2)
+        return r.adjusted(self.TEXT_LEFT, 0, -self._text_right, 0)
 
     def _action_rect(self):
         if not self.action_text:
             return QRectF()
-        aw = QFontMetricsF(font(14, QFont.Weight.Bold)).horizontalAdvance(self.action_text) + 24
-        return QRectF(self.width() - aw - 8, 8, aw, self.height() - 16)
+        return QRectF(self.width() - self._action_width - 8, 8,
+                      self._action_width, self.height() - 16)
 
     def mouseMoveEvent(self, e):
         hov = self._action_rect().contains(e.position())
@@ -1147,10 +1166,8 @@ class _Toast(QWidget):
             "bell": ("#FFA352", "bell"),
         }.get(self.kind, ("#C9D0D8", "info"))
         p.drawPixmap(QPointF(r.left() + 18, r.center().y() - 9), icons.pixmap(ic, col, 18))
-        right = 18
         if self.action_text:
             ar = self._action_rect()
-            right = self.width() - ar.left() + 6
             if self._hover:
                 p.setBrush(qc("#FFFFFF", 0.10))
                 p.drawRoundedRect(ar, 8, 8)
@@ -1158,8 +1175,9 @@ class _Toast(QWidget):
             p.setFont(font(14, QFont.Weight.Bold))
             p.drawText(ar, Qt.AlignmentFlag.AlignCenter, self.action_text)
         p.setPen(QColor("#FFFFFF"))
-        p.setFont(font(14, QFont.Weight.Medium))
-        p.drawText(r.adjusted(46, 0, -right, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text)
+        p.setFont(self._font)
+        p.drawText(self._text_rect(), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+                   | Qt.TextFlag.TextWrapAnywhere, self.text)
 
 
 class ToastManager(QObject):
@@ -1170,8 +1188,9 @@ class ToastManager(QObject):
         host.installEventFilter(self)
 
     def eventFilter(self, obj, ev):
-        if obj is self.host and ev.type() == QEvent.Type.Resize:
-            self._layout()
+        if obj is self.host or obj.property("toast_exclusion"):
+            if ev.type() in (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show, QEvent.Type.Hide):
+                self._layout()
         return False
 
     def show(self, text, kind="info", ms=2400, action_text=None, on_action=None):
@@ -1188,7 +1207,10 @@ class ToastManager(QObject):
         if len(self.toasts) > 3:
             self._dismiss(self.toasts[0])
         _anim(t, 0.0, 1.0, 260, lambda v, tt=t: self._set_k(tt, v)).start()
-        QTimer.singleShot(ms if not action_text else max(ms, 6000), lambda tt=t: self._dismiss(tt))
+        timer = QTimer(t)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda tt=t: self._dismiss(tt))
+        timer.start(ms if not action_text else max(ms, 6000))
         self._layout()
         return t
 
@@ -1218,8 +1240,19 @@ class ToastManager(QObject):
 
     def _layout(self):
         y = self.host.height() - 28
+        for widget in self.host.findChildren(QWidget):
+            try:
+                if not widget.property("toast_exclusion"):
+                    continue
+                widget.installEventFilter(self)
+                if widget.isVisible() and widget.isVisibleTo(self.host):
+                    # 등장·퇴장 때 내려오는 16px까지 비워 둔다
+                    y = min(y, widget.mapTo(self.host, QPoint(0, 0)).y() - 28)
+            except RuntimeError:
+                pass
         for t in reversed(self.toasts):
             try:
+                t._fit_width()
                 k = ease_out_cubic(t.k)
                 x = (self.host.width() - t.width()) // 2
                 t.move(x, int(y - t.height() + (1 - k) * 16))

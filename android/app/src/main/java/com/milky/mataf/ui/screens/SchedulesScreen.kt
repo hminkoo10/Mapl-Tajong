@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -34,9 +35,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.milky.mataf.core.Alarms
 import com.milky.mataf.core.AppEvents
@@ -73,8 +77,9 @@ import com.milky.mataf.ui.theme.text
 private fun changed(ctx: android.content.Context) = Alarms.reschedule(ctx)
 
 @Composable
-fun SchedulesScreen() {
+fun SchedulesScreen(onSelectionBarHeightChanged: (Dp) -> Unit = {}) {
     val ctx = LocalContext.current
+    val density = LocalDensity.current
     val repo = remember { Repo(ctx) }
     val version by AppEvents.version.collectAsState()
     val sets = remember(version) { repo.sets() }
@@ -149,8 +154,12 @@ fun SchedulesScreen() {
         // 고른 일정에 대한 일괄 작업 막대
         AnimatedVisibility(selected.isNotEmpty(), Modifier.align(Alignment.BottomCenter),
             enter = slideInVertically { it * 2 }, exit = slideOutVertically { it * 2 }) {
+            DisposableEffect(Unit) {
+                onDispose { onSelectionBarHeightChanged(0.dp) }
+            }
             Row(
-                Modifier.padding(12.dp).clip(RoundedCornerShape(18.dp)).background(C.grey900).padding(horizontal = 14.dp, vertical = 10.dp)
+                Modifier.onSizeChanged { onSelectionBarHeightChanged(with(density) { it.height.toDp() }) }
+                    .padding(12.dp).clip(RoundedCornerShape(18.dp)).background(C.grey900).padding(horizontal = 14.dp, vertical = 10.dp)
                     .horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {

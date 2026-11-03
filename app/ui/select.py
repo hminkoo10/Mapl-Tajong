@@ -21,7 +21,8 @@ SHADOW = 14
 
 class _SelectPopup(QWidget):
     def __init__(self, combo):
-        super().__init__(None, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint
+        # 바깥 클릭의 hideEvent에서 마지막 참조가 풀려도 Qt 이벤트 처리 중 삭제되지 않게 한다
+        super().__init__(combo, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint
                          | Qt.WindowType.NoDropShadowWindowHint)
         self.combo = combo
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -160,7 +161,7 @@ class _SelectPopup(QWidget):
     def hideEvent(self, e):
         super().hideEvent(e)
         try:
-            self.combo._popup_closed()
+            self.combo._popup_closed(self)
         except RuntimeError:
             pass
 
@@ -251,7 +252,9 @@ class Select(QComboBox):
                 self._popup = None
         super().hidePopup()
 
-    def _popup_closed(self):
+    def _popup_closed(self, popup):
+        if popup is not self._popup:
+            return
         self._popup = None
         self._closed_at = time.monotonic()
         self._animate_open(0.0)

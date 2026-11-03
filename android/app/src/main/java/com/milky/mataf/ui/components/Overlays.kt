@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -73,6 +74,9 @@ object Toasts {
         _cur.value = null
     }
 }
+
+fun toastBottomInset(wide: Boolean, selectionBarHeight: Dp): Dp =
+    (if (wide) 8.dp else 68.dp) + selectionBarHeight
 
 @Composable
 fun ToastHost(modifier: Modifier = Modifier) {
