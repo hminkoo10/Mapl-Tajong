@@ -44,14 +44,35 @@ def show_running(app_name):
         return False
 
 
+def request_quit(app_name):
+    """켜진 프로그램에 정상 종료를 부탁한다. 창 열기 파이프와는 따로 쓴다."""
+    if sys.platform != "win32":
+        return False
+    try:
+        with open("\\\\.\\pipe\\" + _server_name(app_name) + "-quit", "wb", buffering=0):
+            pass
+        return True
+    except OSError:
+        return False
+
+
 def listen(app_name, on_show):
     """두 번째 실행의 '창 열기' 요청을 받는다. 서버는 프로그램이 끝날 때까지 들고 있어야 함."""
+    return _listen(_server_name(app_name), on_show)
+
+
+def listen_quit(app_name, on_quit):
+    """끄기 요청을 GUI 스레드에서 받는다. 기존 창 열기 프로토콜은 바꾸지 않는다."""
+    return _listen(_server_name(app_name) + "-quit", on_quit)
+
+
+def _listen(name, on_request):
     try:
         from PyQt6.QtNetwork import QLocalServer
     except ImportError:   # 묶음에 QtNetwork 가 없어도 프로그램은 켜져야 한다
         return None
     server = QLocalServer()
-    if not server.listen(_server_name(app_name)):
+    if not server.listen(name):
         return None
 
     def accept():
@@ -59,6 +80,6 @@ def listen(app_name, on_show):
             sock = server.nextPendingConnection()
             sock.disconnected.connect(sock.deleteLater)
             sock.disconnectFromServer()
-            on_show()
+            on_request()
     server.newConnection.connect(accept)
     return server

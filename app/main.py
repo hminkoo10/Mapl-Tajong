@@ -1,6 +1,13 @@
 import os
 import sys
 
+# 종료 요청 실행은 화면·재생 모듈도 불러오지 않는다 (창·잠금·허가증 없이 바로 전달).
+if __name__ == "__main__" and "--quit" in sys.argv:
+    from app.core.paths import APP_NAME
+    from app.core.single_instance import request_quit
+    request_quit(APP_NAME)
+    sys.exit(0)
+
 os.environ.setdefault("SDL_NO_SIGNAL_HANDLERS", "1")  # pygame(SDL)이 종료 신호를 가로채지 않도록
 
 # windowed(.exe)로 실행하면 stdout/stderr가 없어 라이브러리 출력에서 오류가 날 수 있다.
@@ -17,7 +24,7 @@ from app.core import cloud_sync
 from app.core import magoedu_cloud as cloud
 from app.core import paths
 from app.core.paths import APP_NAME, app_data_dir, asset_path, resource_path, ui_cache_dir
-from app.core.single_instance import acquire, listen, show_running
+from app.core.single_instance import acquire, listen, listen_quit, request_quit, show_running
 from app.core.startup import legacy_app_running, remove_legacy_autostart
 from app.core.watchdog import HangWatch, enable_crash_log
 from app.ui.main_window import MainWindow
@@ -95,6 +102,9 @@ def _ask_first_sync():
 
 
 def main():
+    if "--quit" in sys.argv:   # 허가증·잠금·창 없이 요청만 전달. 켜진 게 없어도 조용히 끝낸다
+        request_quit(APP_NAME)
+        return
     if show_running(APP_NAME):   # 이미 켜져 있으면 그 창을 열고 끝 (허가증을 다시 확인하지 않음)
         return
     session = cloud.check(APP_ID)
@@ -142,6 +152,7 @@ def main():
     win.resize(1240, 800)
     win.show()
     server = listen(APP_NAME, lambda: win._tray_show())  # noqa: F841 (끝날 때까지 들고 있음)
+    quit_server = listen_quit(APP_NAME, lambda: win._shutdown(0))  # noqa: F841 (저장·flush 후 정상 종료)
 
     watch = HangWatch(app_data_dir())
     beat = QTimer()
