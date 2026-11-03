@@ -17,7 +17,7 @@ from app.core import cloud_sync
 from app.core import magoedu_cloud as cloud
 from app.core import paths
 from app.core.paths import APP_NAME, app_data_dir, asset_path, resource_path, ui_cache_dir
-from app.core.single_instance import acquire
+from app.core.single_instance import acquire, listen, show_running
 from app.core.startup import legacy_app_running, remove_legacy_autostart
 from app.core.watchdog import HangWatch, enable_crash_log
 from app.ui.main_window import MainWindow
@@ -95,6 +95,8 @@ def _ask_first_sync():
 
 
 def main():
+    if show_running(APP_NAME):   # 이미 켜져 있으면 그 창을 열고 끝 (허가증을 다시 확인하지 않음)
+        return
     session = cloud.check(APP_ID)
     if session is None:
         _without_cloud()
@@ -139,6 +141,7 @@ def main():
     win = MainWindow(conn, app, session, prefer_local)
     win.resize(1240, 800)
     win.show()
+    server = listen(APP_NAME, lambda: win._tray_show())  # noqa: F841 (끝날 때까지 들고 있음)
 
     watch = HangWatch(app_data_dir())
     beat = QTimer()
