@@ -1,0 +1,80 @@
+{
+  "app": "MaplTajong",
+  "kind": "config",
+  "format": 1,
+  "sounds": [
+    {
+      "id": 1,
+      "name": "bell1",
+      "file_name": "bell1.wav",
+      "volume": 1.0,
+      "created_at": "2026-11-03 01:50:00"
+    },
+    {
+      "id": 2,
+      "name": "bell2",
+      "file_name": "bell2.wav",
+      "volume": 1.0,
+      "created_at": "2026-11-03 01:49:20"
+    },
+    {
+      "id": 3,
+      "name": "bell3",
+      "file_name": "bell3.wav",
+      "volume": 1.0,
+      "created_at": "2026-11-03 01:49:20"
+    },
+    {
+      "id": 4,
+      "name": "bell4",
+      "file_name": "bell4.wav",
+      "volume": 1.0,
+      "created_at": "2026-11-03 01:49:20"
+    },
+    {
+      "id": 5,
+      "name": "bell5",
+      "file_name": "bell5.wav",
+      "volume": 1.0,
+      "created_at": "2026-11-03 01:49:20"
+    },
+    {
+      "id": 6,
+      "name": "bell6",
+      "file_name": "bell6.wav",
+      "volume": 1.0,
+      "created_at": "2026-11-03 01:49:20"
+    },
+    {
+      "id": 7,
+      "name": "bell7",
+      "file_name": "bell7.wav",
+      "volume": 1.0,
+      "created_at": "2026-11-03 01:49:20"
+    },
+    {
+      "id": 8,
+      "name": "bell8",
+      "file_name": "bell8.wav",
+      "volume": 1.0,
+      "created_at": "2026-11-03 01:49:20"
+    }
+  ],
+  "schedule_sets": [
+    {
+      "id": 1,
+      "name": "기본",
+      "created_at": "2026-11-03 01:49:20"
+    }
+  ],
+  "schedules": [],
+  "settings": {
+    "active_set_id": "1"
+  },
+  "meta": {
+    "device_id": "00000000-0000-4000-8000-000000000001",
+    "device_name": "Test Phone",
+    "at": "2026-11-03T12:13:15Z"
+  },
+  "sig": "31af491d90c8d66622928261eba04fc2e7e7cdbbb34f5c3948f83969c742b7f8"
+}

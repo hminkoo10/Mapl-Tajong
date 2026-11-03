@@ -1,0 +1,14 @@
+{
+  "app": "MaplTajong",
+  "kind": "state",
+  "format": 1,
+  "paused": false,
+  "overrides": [],
+  "ring_requests": [],
+  "meta": {
+    "device_id": "fixture-android",
+    "device_name": "교무실 Android",
+    "at": "2026-11-03T12:37:54Z"
+  },
+  "sig": "36194825eed7b2f4fb55bbef300ed70cc8a9442edb06bc8ffdca6f266366e20f"
+}

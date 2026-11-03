@@ -1,0 +1,2 @@
+# HMAC covers exact bytes, including newlines. Never convert these fixtures to CRLF.
+*.json -text

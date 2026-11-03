@@ -1,0 +1,46 @@
+{
+ "app": "MaplTajong",
+ "kind": "state",
+ "format": 1,
+ "paused": true,
+ "overrides": [
+  {
+   "date": "2026-11-03",
+   "schedule_id": 0,
+   "action": "PAUSE_DAY",
+   "note": "admin"
+  },
+  {
+   "date": "2026-11-03",
+   "schedule_id": 7,
+   "action": "SKIP_ONCE",
+   "note": "admin"
+  }
+ ],
+ "ring_requests": [
+  {
+   "id": "schedule-request",
+   "schedule_id": 7,
+   "sound_id": null,
+   "at": "2026-11-03T12:37:54Z",
+   "ring_at": "2026-11-03T12:37:57.257Z",
+   "by": "fixture-sender",
+   "by_name": "교무실 폰 🔔"
+  },
+  {
+   "id": "sound-request",
+   "schedule_id": null,
+   "sound_id": 8,
+   "at": "2026-11-03T12:37:54Z",
+   "ring_at": "2026-11-03T12:37:57.000Z",
+   "by": "fixture-sender",
+   "by_name": "교무실 폰 🔔"
+  }
+ ],
+ "meta": {
+  "device_id": "fixture-pc",
+  "device_name": "교무실 PC",
+  "at": "2026-11-03T12:37:54Z"
+ },
+ "sig": "ef1d97ca7919b8181935cf7b6a9c19a13755b022f69e6c2ef35f12ba4cfced5f"
+}

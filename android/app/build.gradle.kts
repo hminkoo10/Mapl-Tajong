@@ -57,6 +57,8 @@ android {
         buildConfig = true
     }
 
+    sourceSets.getByName("test").resources.srcDir(rootProject.file("../tests/fixtures"))
+
     androidResources {
         noCompress += setOf("wav", "mp3", "ogg", "m4a")
     }
