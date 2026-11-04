@@ -1,23 +1,23 @@
 # Android 앱 빌드·배포
-#   - dev/** 브랜치에 android/ 가 바뀌면: APK 를 빌드해 Actions 결과물로 올린다 (배포는 안 함)
 #   - main 에 android/ 가 바뀌면: android/version.properties 의 버전이 아직 배포되지 않았을 때만
-#     빌드 → GitHub Release(태그 android-vX.Y.Z)에 APK 를 올린다. 이미 있는 버전이면 빌드만 한다.
+#     빌드 → GitHub Release(태그 android-vX.Y.Z)에 APK 를 올린다. 이미 있는 버전이면 아무것도 안 한다.
 #   - release/android-vX.Y.Z 브랜치를 만들거나 android-vX.Y.Z 태그를 올려도 배포한다
+#   - 그 밖의 브랜치는 Actions → Android → Run workflow 로 손으로 빌드 (APK 는 3일 동안 결과물로 남음)
 # 서명 키는 저장소 비밀값 ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD 로 넣는다.
 # 비밀값이 없으면 시험용(디버그) 키로 서명하고, 배포는 하지 않는다 (키가 바뀌면 자동 업데이트가 안 되니까).
 name: Android
 
 on:
   push:
-    branches: ["main", "dev/**", "release/android-v*"]
+    branches: ["main", "release/android-v*"]
     tags: ["android-v*"]
     paths: ["android/**", ".github/workflows/android.yml"]
   workflow_dispatch:
 
 concurrency:
   group: android-${{ github.ref }}
-  # 배포하는 실행이 중간에 끊기지 않게, 취소는 dev 브랜치에서만
-  cancel-in-progress: ${{ startsWith(github.ref, 'refs/heads/dev/') }}
+  # 배포하는 실행이 중간에 끊기지 않게
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -34,13 +34,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - uses: gradle/actions/setup-gradle@v4
-
       - name: Read version
         shell: bash
         env:
@@ -50,6 +43,7 @@ jobs:
           name=$(grep '^versionName=' version.properties | cut -d= -f2)
           code=$(grep '^versionCode=' version.properties | cut -d= -f2)
           publish=0
+          skip=0
           case "$GITHUB_REF" in
             refs/heads/release/*|refs/tags/*)
               want="${GITHUB_REF#refs/heads/release/}"
@@ -60,7 +54,8 @@ jobs:
               publish=1 ;;
             refs/heads/main)
               if gh release view "android-v$name" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-                echo "android-v$name 은 이미 배포됐어요. 빌드만 해요."
+                echo "android-v$name 은 이미 배포됐어요. 빌드하지 않아요."
+                skip=1
               else
                 publish=1
               fi ;;
@@ -68,8 +63,19 @@ jobs:
           echo "VERSION=$name" >> "$GITHUB_ENV"
           echo "VERSION_CODE=$code" >> "$GITHUB_ENV"
           echo "PUBLISH=$publish" >> "$GITHUB_ENV"
+          echo "SKIP=$skip" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        if: env.SKIP != '1'
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: env.SKIP != '1'
 
       - name: Signing key
+        if: env.SKIP != '1'
         shell: bash
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -85,6 +91,7 @@ jobs:
           fi
 
       - name: Build APK
+        if: env.SKIP != '1'
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -94,6 +101,7 @@ jobs:
           ./gradlew --no-daemon assembleRelease
 
       - name: Collect APK
+        if: env.SKIP != '1'
         shell: bash
         run: |
           set -euo pipefail
@@ -102,10 +110,13 @@ jobs:
           (cd out && sha256sum "MaplTajong-${VERSION}.apk" > "MaplTajong-${VERSION}.apk.sha256")
           ls -la out
 
+      # 배포하는 실행은 Release 에 올라가므로, 손으로 돌린 시험 빌드만 결과물로 남김
       - uses: actions/upload-artifact@v4
+        if: env.SKIP != '1' && env.PUBLISH != '1'
         with:
           name: MaplTajong-android-${{ env.VERSION }}
           path: android/out/*
+          retention-days: 3
 
       - name: Release notes
         if: env.PUBLISH == '1'

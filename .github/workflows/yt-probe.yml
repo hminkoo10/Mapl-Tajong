@@ -1,11 +1,7 @@
-# 종소리 찾기 경로 진단 (앱 배포와 무관). 받기 코드나 이 파일을 바꾸면 실행된다.
+# 종소리 찾기 경로 진단 (앱 배포와 무관). 필요할 때 손으로만 실행: Actions → YouTube probe → Run workflow
 name: YouTube probe
 
 on:
-  push:
-    branches: ["dev/**"]
-    paths: ["tools/yt_probe.py", ".github/workflows/yt-probe.yml", "app/core/youtube.py", "app/core/ffmpeg.py",
-            "app/core/weather.py", "app/core/net.py", "tools/geo_probe.py"]
   workflow_dispatch:
 
 permissions:

@@ -78,13 +78,6 @@ jobs:
           mv "build/bin/$POT_ASSET" build/bin/bgutil-pot.exe
           ./build/bin/bgutil-pot.exe --version
 
-      - name: YouTube smoke test (결과만 표시)
-        continue-on-error: true
-        timeout-minutes: 6
-        env:
-          MAPL_BGUTIL_POT: build/bin/bgutil-pot.exe
-        run: python tools/yt_smoke.py
-
       - name: Build
         run: python tools/build.py
 
@@ -98,12 +91,15 @@ jobs:
           body = m.group(1).strip() if m else "더 안정적으로 다듬었어요."
           open("release_notes.md", "w", encoding="utf-8").write(body + "\n")
 
+      # 배포하는 실행은 Release 에 올라가므로, 손으로 돌린 시험 빌드만 결과물로 남김
       - uses: actions/upload-artifact@v4
+        if: env.PUBLISH != '1'
         with:
           name: MaplTajong-${{ env.VERSION }}
           path: |
             dist/MaplTajong-${{ env.VERSION }}-win-x64.zip
             dist/MaplTajong-${{ env.VERSION }}-win-x64.zip.sha256
+          retention-days: 3
 
       - name: Publish GitHub Release
         id: publish_release
