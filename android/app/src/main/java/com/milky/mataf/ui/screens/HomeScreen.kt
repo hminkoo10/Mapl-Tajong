@@ -196,7 +196,7 @@ fun HomeScreen() {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     ActionTile(if (paused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
                         if (paused) "자동 타종 다시 켜기" else "잠시 멈추기",
-                        if (paused) "멈춘 동안 울리지 않았어요" else "자동 타종을 멈춰요", Modifier.weight(1f)) {
+                        if (paused) "잠시 멈춘 동안이라 울리지 않았어요" else "자동 타종을 멈춰요", Modifier.weight(1f)) {
                         Scheduler.setPaused(ctx, !paused)
                         Toasts.show(if (paused) "자동 타종을 다시 켰어요" else "자동 타종을 잠시 멈췄어요")
                     }
@@ -381,7 +381,7 @@ private fun TodayRow(ev: TodayEvent, now: LocalDateTime, ringsHere: Boolean, onU
     val nxt = ev.status == "next"
     val past = ev.status in setOf("played", "skipped", "failed", "missed", "passed")
     val undo = when (ev.status) {
-        "will_skip" -> Scheduler.SKIP to "울리기"
+        "will_skip" -> Scheduler.SKIP to "건너뛰기 취소"
         // 미리 울림 표시는 기기마다 따로라서, 울리지 않는 기기에서 지워도 울리는 기기에는 그대로다
         "rang_early" -> if (ringsHere) Scheduler.FIRED to "제때 울리기" else null
         else -> null

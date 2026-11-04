@@ -1,5 +1,7 @@
 package com.milky.mataf.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -41,6 +43,7 @@ import com.milky.mataf.R
 import com.milky.mataf.core.AppEvents
 import com.milky.mataf.core.Cloud
 import com.milky.mataf.core.CloudModel
+import com.milky.mataf.core.helpUrl
 import com.milky.mataf.data.Repo
 import com.milky.mataf.ui.components.Btn
 import com.milky.mataf.ui.components.BtnStyle
@@ -193,6 +196,13 @@ fun CloudGate() {
                     Btn(if (busy) "로그인하는 중" else "로그인", { go() }, Modifier.fillMaxWidth(), style = BtnStyle.Primary, large = true, enabled = ok)
                 }
                 Text("아이디가 없으면 원장님이나 운영자에게 받아 주세요.", style = text(13, color = C.grey500))
+                Btn("처음이세요? 사용 설명서 보기", {
+                    try {
+                        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(helpUrl(server))))
+                    } catch (e: Exception) {
+                        Toasts.show("브라우저를 열 수 없어요", "warning")
+                    }
+                }, style = BtnStyle.Subtle)
             }
         }
         ToastHost(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))

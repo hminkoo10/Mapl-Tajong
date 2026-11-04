@@ -102,7 +102,7 @@ fun LogsScreen() {
                     Text(TimeUtil.ampm(r.at.substringAfter(" ").take(5)), style = text(14, FontWeight.SemiBold, C.grey700),
                         modifier = Modifier.width(84.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(r.scheduleName.ifEmpty { "직접 울림" }, style = text(15, FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(r.scheduleName.ifEmpty { "수동 타종" }, style = text(15, FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         val sub = listOf(r.soundName, detailText(r.detail), if (merged) r.device.ifEmpty { "이 기기" } else "")
                             .filter { it.isNotEmpty() }.joinToString(" · ")
                         Text(sub, style = text(12, color = C.grey500), maxLines = 1, overflow = TextOverflow.Ellipsis)

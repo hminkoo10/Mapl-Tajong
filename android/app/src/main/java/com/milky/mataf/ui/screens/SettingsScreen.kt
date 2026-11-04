@@ -36,11 +36,13 @@ import com.milky.mataf.core.Alarms
 import com.milky.mataf.core.AppEvents
 import com.milky.mataf.core.Backup
 import com.milky.mataf.core.BellService
+import com.milky.mataf.core.Cloud
 import com.milky.mataf.core.GoogleLogin
 import com.milky.mataf.core.Preview
 import com.milky.mataf.core.Updater
 import com.milky.mataf.core.Updates
 import com.milky.mataf.core.Weather
+import com.milky.mataf.core.helpUrl
 import com.milky.mataf.data.Repo
 import com.milky.mataf.ui.components.Btn
 import com.milky.mataf.ui.components.BtnStyle
@@ -245,7 +247,7 @@ fun SettingsScreen(extra: @Composable () -> Unit = {}) {
             Text("업데이트", style = text(17, FontWeight.Bold))
             Spacer(Modifier.height(6.dp))
             SettingRow("버전 ${BuildConfig.VERSION_NAME}", Updates.statusText(upd, autoUpdate)) {
-                Btn(if (hasUpdate) "업데이트" else "확인", {
+                Btn(if (hasUpdate) "업데이트" else "새 버전 확인", {
                     if (hasUpdate) Updates.installNow(ctx) else Updates.check(ctx, manual = true)
                 }, style = if (hasUpdate) BtnStyle.Primary else BtnStyle.Secondary, small = true, enabled = !updBusy)
             }
@@ -272,6 +274,16 @@ fun SettingsScreen(extra: @Composable () -> Unit = {}) {
         Card {
             Text("정보", style = text(17, FontWeight.Bold))
             Spacer(Modifier.height(6.dp))
+            SettingRow("사용 설명서") {
+                Btn("열기", {
+                    try {
+                        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(helpUrl(Cloud.status.value.server))))
+                    } catch (e: Exception) {
+                        Toasts.show("브라우저를 열 수 없어요", "warning")
+                    }
+                }, small = true)
+            }
+            Divider()
             val at = googleAt
             SettingRow("YouTube 구글 로그인",
                 if (at != null) "로그인됨 · ${java.time.Instant.ofEpochMilli(at).atZone(java.time.ZoneId.systemDefault())

@@ -60,7 +60,6 @@ import com.milky.mataf.ui.components.ConfirmDialog
 import com.milky.mataf.ui.components.DayChips
 import com.milky.mataf.ui.components.Empty
 import com.milky.mataf.ui.components.Field
-import com.milky.mataf.ui.components.IconBtn
 import com.milky.mataf.ui.components.Label
 import com.milky.mataf.ui.components.MenuItem
 import com.milky.mataf.ui.components.Page
@@ -92,7 +91,7 @@ fun SchedulesScreen(onSelectionBarHeightChanged: (Dp) -> Unit = {}) {
     var adding by remember { mutableStateOf(false) }
     var batch by remember { mutableStateOf(false) }
     var setMenu by remember { mutableStateOf(false) }
-    var askName by remember { mutableStateOf<Pair<String, (String) -> Unit>?>(null) }
+    var askName by remember { mutableStateOf<Triple<String, String, (String) -> Unit>?>(null) }
     var confirmDelete by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
 
     val rows = all.filter { s ->
@@ -108,13 +107,17 @@ fun SchedulesScreen(onSelectionBarHeightChanged: (Dp) -> Unit = {}) {
                     repo.setActiveSet(it); selected.clear(); changed(ctx)
                 }, Modifier.weight(1f), onPage = true)
                 Box {
-                    IconBtn(Icons.Rounded.MoreVert, { setMenu = true }, bg = Color.White)
+                    Btn("세트 관리", { setMenu = true }, style = BtnStyle.White, icon = Icons.Rounded.MoreVert, small = true)
                     AppMenu(setMenu, { setMenu = false }, listOf(
-                        MenuItem("새 세트 만들기") { askName = "새 세트 이름" to { n: String -> repo.setActiveSet(repo.createSet(n)); changed(ctx) } },
-                        MenuItem("이 세트 이름 바꾸기") { askName = "세트 이름" to { n: String -> repo.renameSet(activeId, n); changed(ctx) } },
+                        MenuItem("새 세트 만들기") { askName = Triple("새 세트 이름", "") { n: String -> repo.setActiveSet(repo.createSet(n)); changed(ctx) } },
+                        MenuItem("이 세트 이름 바꾸기") {
+                            askName = Triple("세트 이름", sets.firstOrNull { it.id == activeId }?.name.orEmpty()) { n: String ->
+                                repo.renameSet(activeId, n); changed(ctx)
+                            }
+                        },
                         MenuItem("이 세트 복제") {
                             val cur = sets.firstOrNull { it.id == activeId }?.name ?: "세트"
-                            repo.setActiveSet(repo.duplicateSet(activeId, "$cur 사본")); changed(ctx)
+                            repo.setActiveSet(repo.duplicateSet(activeId, "$cur 복사본")); changed(ctx)
                             Toasts.show("세트를 복제했어요", "success")
                         },
                         MenuItem("이 세트 삭제", danger = true) {
@@ -200,8 +203,8 @@ fun SchedulesScreen(onSelectionBarHeightChanged: (Dp) -> Unit = {}) {
             Toasts.show("${selected.size}개를 바꿨어요", "success")
         }
     }
-    askName?.let { (title, ok) ->
-        NameDialog(title, onDismiss = { askName = null }) { ok(it); askName = null }
+    askName?.let { (title, initial, ok) ->
+        NameDialog(title, initial, onDismiss = { askName = null }) { ok(it); askName = null }
     }
     confirmDelete?.let { (msg, ok) ->
         ConfirmDialog("지울까요?", msg, "삭제", ok, { confirmDelete = null })

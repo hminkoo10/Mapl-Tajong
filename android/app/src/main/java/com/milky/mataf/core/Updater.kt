@@ -79,7 +79,7 @@ object Updater {
         e is HttpError && e.code == 403 -> "이 계정에는 안드로이드 앱을 받을 권한이 없어요. 관리자에게 문의해 주세요."
         e is HttpError && e.code == 404 -> "서버에서 이 버전을 찾지 못했어요. 업데이트를 다시 확인해 주세요."
         e is HttpError && e.code in setOf(429, 503) -> "업데이트 서버가 잠시 바빠요. 나중에 다시 확인할게요."
-        e is HttpError -> "업데이트 정보를 가져오지 못했어요. (HTTP ${e.code})"
+        e is HttpError -> "새 버전을 받지 못했어요. 인터넷 연결을 확인하고 다시 해 주세요. (HTTP ${e.code})"
         e is IOException -> "마고에듀 서버에 연결하지 못했어요. 서버 주소와 인터넷 연결을 확인한 뒤 다시 시도해 주세요."
         else -> "서버의 업데이트 정보를 읽지 못했어요. 잠시 뒤 다시 확인해 주세요."
     }
@@ -168,7 +168,7 @@ object Updater {
                           progress: (Float) -> Unit = {}, cancelled: () -> Boolean = { false }): File {
         val (server, token) = requireCredentials(credentials)
         val expected = info.sha256?.takeIf { SHA_RE.matches(it) }?.lowercase()
-            ?: throw UpdateError("설치 파일을 확인할 값(SHA-256)이 없어서 받지 않았어요. 서버의 배포 정보를 확인해 주세요.")
+            ?: throw UpdateError("새 버전을 안전하게 받을 수 있는지 확인하지 못했어요. 원장님이나 운영자에게 알려 주세요. (SHA-256 없음)")
 
         val dst = File(directory, File(info.assetName).name)
         if (dst.exists() && sha256(dst) == expected) {
