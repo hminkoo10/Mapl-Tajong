@@ -38,6 +38,17 @@
             </intent-filter>
         </activity>
 
+        <!-- noHistory를 쓰면 DocumentsUI에 가려질 때 proxy가 사라져 결과를 받을 수 없다. -->
+        <activity
+            android:name=".SoundPickerActivity"
+            android:exported="false"
+            android:label="파일 선택"
+            android:taskAffinity="${applicationId}.soundpicker"
+            android:excludeFromRecents="true"
+            android:resizeableActivity="true"
+            android:theme="@style/Theme.Mataf.SoundPicker"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|uiMode" />
+
         <activity
             android:name=".FullscreenActivity"
             android:exported="false"

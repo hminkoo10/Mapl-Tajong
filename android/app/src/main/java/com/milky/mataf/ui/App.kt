@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import com.milky.mataf.R
 import com.milky.mataf.core.Cloud
 import com.milky.mataf.core.Sounds
+import com.milky.mataf.core.SoundPicker
 import com.milky.mataf.core.Updater
 import com.milky.mataf.core.Updates
 import com.milky.mataf.data.Repo
@@ -117,14 +118,17 @@ fun App() {
 
 @Composable
 private fun Main() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val picker by SoundPicker.state.collectAsState()
     var tab by rememberSaveable { mutableStateOf(Tab.Home) }
     var sub by remember { mutableStateOf<Sub?>(null) }
     var scheduleSelectionBarHeight by remember { mutableStateOf(0.dp) }
     val wide = isWide()
     val holder = rememberSaveableStateHolder()
 
-    BackHandler(enabled = sub != null || tab != Tab.Home) {
-        if (sub != null) sub = null else tab = Tab.Home
+    BackHandler(enabled = picker.pending || sub != null || tab != Tab.Home) {
+        if (picker.pending) SoundPicker.cancel(ctx)
+        else if (sub != null) sub = null else tab = Tab.Home
     }
     val select: (Tab) -> Unit = { sub = null; tab = it }
 

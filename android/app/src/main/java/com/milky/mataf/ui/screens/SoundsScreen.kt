@@ -1,8 +1,6 @@
 package com.milky.mataf.ui.screens
 
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +43,7 @@ import com.milky.mataf.core.Alarms
 import com.milky.mataf.core.AppEvents
 import com.milky.mataf.core.Preview
 import com.milky.mataf.core.Sounds
+import com.milky.mataf.core.SoundPicker
 import com.milky.mataf.data.Repo
 import com.milky.mataf.data.Sound
 import com.milky.mataf.ui.components.AppMenu
@@ -64,6 +64,7 @@ import com.milky.mataf.ui.components.Toasts
 import com.milky.mataf.ui.theme.C
 import com.milky.mataf.ui.theme.text
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -78,21 +79,25 @@ fun SoundsScreen(onSearch: () -> Unit, onEdit: (Sound) -> Unit) {
     val scope = rememberCoroutineScope()
     var durations by remember { mutableStateOf<Map<Long, Int?>>(emptyMap()) }
     var info by remember { mutableStateOf<Sound?>(null) }
-    var pendingUri by remember { mutableStateOf<Uri?>(null) }
+    val picker by SoundPicker.state.collectAsState()
     var confirm by remember { mutableStateOf<Sound?>(null) }
 
     // 길이는 파일을 열어 봐야 알 수 있어 뒤에서 계산한다
     androidx.compose.runtime.LaunchedEffect(version) {
         durations = withContext(Dispatchers.IO) { sounds.associate { it.id to Sounds.durationMs(ctx, it.fileName) } }
     }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) pendingUri = uri }
 
     Page(14.dp) {
         PageHeader("종소리", "파일을 넣거나 YouTube·SoundCloud에서 찾아 받고, 필요한 부분만 잘라 쓸 수 있어요.")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Btn("찾아서 받기", onSearch, style = BtnStyle.Primary, icon = Icons.Rounded.Search)
-            Btn("파일 추가", { picker.launch(arrayOf("audio/*")) }, style = BtnStyle.White, icon = Icons.Rounded.Add)
+            Btn("파일 추가", { SoundPicker.open(ctx) }, enabled = picker.idle, style = BtnStyle.White, icon = Icons.Rounded.Add)
         }
+        if (picker.pending) Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("파일을 고르는 중…", style = text(14, color = C.grey500))
+            Btn("취소", { SoundPicker.cancel(ctx) }, style = BtnStyle.White)
+        }
+        if (picker.importing) Text("종소리를 추가하는 중…", style = text(14, color = C.grey500))
         Card(padding = 8.dp) {
             if (sounds.isEmpty()) Empty("종소리가 없어요")
             sounds.forEachIndexed { i, s ->
@@ -113,16 +118,19 @@ fun SoundsScreen(onSearch: () -> Unit, onEdit: (Sound) -> Unit) {
         Text("${sounds.size}개 · 눌러서 들어볼 수 있어요", style = text(13, color = C.grey500), modifier = Modifier.padding(start = 4.dp))
     }
 
-    pendingUri?.let { uri ->
-        SoundInfoSheet("파일 추가", Sounds.displayName(ctx, uri).substringBeforeLast('.'), 100, onDismiss = { pendingUri = null }) { name, vol ->
-            pendingUri = null
-            scope.launch {
+    picker.uri?.takeUnless { picker.importing }?.let { selected ->
+        val uri = Uri.parse(selected)
+        SoundInfoSheet("파일 추가", Sounds.displayName(ctx, uri).substringBeforeLast('.'), 100, onDismiss = { SoundPicker.cancel(ctx) }) { name, vol ->
+            SoundPicker.beginImport()
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
                 try {
                     withContext(Dispatchers.IO) { Sounds.importUri(ctx, uri, name, vol / 100.0) }
                     AppEvents.changed()
                     Toasts.show("$name 종소리를 추가했어요", "success")
                 } catch (e: Exception) {
                     Toasts.show("추가하지 못했어요: ${e.message}", "error")
+                } finally {
+                    SoundPicker.imported(ctx, picker.requestId)
                 }
             }
         }
@@ -173,8 +181,8 @@ private fun SoundRow(s: Sound, used: Int, duration: String, playing: Boolean, on
 
 @Composable
 fun SoundInfoSheet(title: String, name0: String, volume0: Int, onDismiss: () -> Unit, onOk: (String, Int) -> Unit) {
-    var name by remember { mutableStateOf(name0) }
-    var vol by remember { mutableStateOf(volume0) }
+    var name by rememberSaveable(name0) { mutableStateOf(name0) }
+    var vol by rememberSaveable(volume0) { mutableStateOf(volume0) }
     AppSheet(title, onDismiss, footer = { SheetButtons("저장", { onOk(name.trim(), vol) }, onDismiss, okEnabled = name.isNotBlank()) }) {
         Column { Label("이름"); Field(name, { name = it }, Modifier.fillMaxWidth()) }
         Column { Label("기본 음량"); VolumeSlider(vol) { vol = it } }
