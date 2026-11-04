@@ -30,10 +30,12 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 __all__ = ["Session", "check", "verify_ticket", "open_cloud", "installed_version_file", "newer_version_installed",
-           "RESTART_EXIT_CODE", "REASON"]
+           "RESTART_EXIT_CODE", "REASON", "DEFAULT_SERVER", "help_url"]
 
+DEFAULT_SERVER = "https://mago.milky.kr"
 RESTART_EXIT_CODE = 75  # 이 값으로 끝내면 통합 클라우드가 바로 다시 켠다 (새 버전 적용)
 TICKET_PREFIX = "MGT1"
 CLOUD_DIR_NAME = "MagoEduCloud"
@@ -51,6 +53,22 @@ class Session:
     expires_at: float = 0.0
     dev: bool = False
     payload: dict = field(default_factory=dict)
+
+
+def help_url(session: Session | None) -> str:
+    """통합 클라우드 서버의 설명서 주소. 잘못된 서버 주소는 기본 서버로 대신한다."""
+    server = getattr(session, "server", "")
+    server = server.strip().rstrip("/") if isinstance(server, str) else ""
+    try:
+        url = urlsplit(server)
+        valid = (url.scheme in ("http", "https") and bool(url.hostname)
+                 and url.port != 0 and url.username is None and url.password is None
+                 and "?" not in server and "#" not in server
+                 and not re.search(r"[\s\\\x00-\x1f\x7f]", server)
+                 and re.fullmatch(r"[\w.:-]+", url.hostname) is not None)
+    except ValueError:
+        valid = False
+    return f"{server if valid else DEFAULT_SERVER}/help/tajong.html"
 
 
 # ---------------------------------------------------------------------------

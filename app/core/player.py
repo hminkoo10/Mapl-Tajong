@@ -180,7 +180,7 @@ class SoundPlayer:
         if not p.exists():
             raise FileNotFoundError(str(p))
         if not self._init_mixer():
-            raise RuntimeError("오디오 장치를 초기화할 수 없습니다. 스피커 연결을 확인해 주세요.")
+            raise RuntimeError("소리를 재생할 준비를 하지 못했어요. 스피커 연결을 확인해 주세요.")
 
         vol = 1.0 if volume is None else max(0.0, min(2.0, float(volume)))
         src, mixer_vol = str(p), vol

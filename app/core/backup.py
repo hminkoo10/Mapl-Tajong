@@ -302,14 +302,14 @@ def read_manifest(src):
         with zipfile.ZipFile(src) as z:
             m = json.loads(z.read("manifest.json").decode("utf-8"), parse_int=_json_int)
     except Exception:
-        raise BackupError("타종 프로그램 백업 파일이 아닙니다.")
+        raise BackupError("마고 타종에서 만든 백업 파일이 아니에요.")
     if not isinstance(m, dict) or m.get("app") != "MaplTajong":
-        raise BackupError("타종 프로그램 백업 파일이 아닙니다.")
+        raise BackupError("마고 타종에서 만든 백업 파일이 아니에요.")
     fmt = _clean_int(m.get("format", FORMAT))
     if fmt is None or fmt < 1:
-        raise BackupError("타종 프로그램 백업 파일이 아닙니다.")
+        raise BackupError("마고 타종에서 만든 백업 파일이 아니에요.")
     if fmt > FORMAT:
-        raise BackupError("더 최신 버전에서 만든 백업입니다. 프로그램을 업데이트해 주세요.")
+        raise BackupError("더 최신 버전에서 만든 백업이에요. 프로그램을 업데이트해 주세요.")
     counts = m.get("counts")
     m["counts"] = {t: n if n is not None and 0 <= n <= MAX_ROWS[t] else 0
                    for t in _TABLES for n in [_clean_int(counts.get(t)) if isinstance(counts, dict) else None]}
@@ -380,7 +380,7 @@ def import_backup(conn, src, before_replace_files=None):
         conn.commit()
     except Exception as e:
         conn.rollback()
-        raise BackupError(f"복원 중 오류가 발생했습니다: {e}")
+        raise BackupError(f"백업을 불러오다가 문제가 생겼어요: {e}")
     return {t: len(data[t]) for t in _TABLES}
 
 

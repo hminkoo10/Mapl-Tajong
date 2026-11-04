@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout
 
 from app.core import google_login
 from app.ui.dialogs import BaseDialog
+from app.ui.messages import error_message
 from app.ui.theme import C
 from app.ui.widgets import Spinner
 from app.ui.workers import run_async
@@ -94,7 +95,8 @@ class GoogleLoginDialog(BaseDialog):
                 return
             self.spinner.hide()
             self.status.setText("로그인하지 못했어요")
-            self.show_error(msg)
+            self.show_error(error_message(
+                "구글 로그인하지 못했어요. 인터넷 연결을 확인하고 로그인 창을 다시 열어 주세요.", msg))
             self.btn_ok.hide()
             self.btn_cancel.setText("닫기")
         except RuntimeError:

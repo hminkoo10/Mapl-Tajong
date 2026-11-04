@@ -13,6 +13,7 @@ from app.core.paths import download_tmp_dir
 from app.ui import icons
 from app.data import repo
 from app.ui.dialogs import BaseDialog
+from app.ui.messages import error_message
 from app.ui.sound_editor import SoundEditorDialog
 from app.ui.theme import C, font, mix, qc
 from app.ui.widgets import (Button, ChipButton, SegmentedControl, Spinner, TickingWidget, _anim, ease_out_cubic,
@@ -375,14 +376,14 @@ class YoutubeDialog(BaseDialog):
         except RuntimeError:
             pass
 
-    def _set_state(self, text, busy=False, error=False, retry=None):
+    def _set_state(self, text, busy=False, error=False, retry=None, error_summary=None):
         self._retry = retry if error and youtube.is_blocked_message(text) else None
         try:
             self.btn_login.setText("다시 로그인하고 받기" if google_login.is_logged_in() else "구글 로그인하고 받기")
             self.btn_login.setVisible(self._retry is not None)
         except RuntimeError:
             return
-        self.state_label.setText(text)
+        self.state_label.setText(error_message(error_summary, text) if error_summary else text)
         self.state_label.setWordWrap(True)
         self.state_label.setStyleSheet(f"color: {C.danger if error else C.grey600}; font-weight: {600 if error else 400};")
         self.spinner.setVisible(busy)
@@ -443,7 +444,8 @@ class YoutubeDialog(BaseDialog):
                 return
             self.btn_search.setEnabled(True)
             self._empty("결과를 가져오지 못했어요")
-            self._set_state(msg, error=True)
+            self._set_state(msg, error=True, error_summary=
+                            "검색 결과를 가져오지 못했어요. 인터넷 연결을 확인하고 다시 찾아 주세요.")
         except RuntimeError:
             pass
 
@@ -537,7 +539,8 @@ class YoutubeDialog(BaseDialog):
             card.set_preview("idle")
             self._pv_card = None
             self._sync_preview_button()
-            self._set_state(msg, error=True, retry=lambda c=card: self.toggle_preview(c) if c in self.cards else None)
+            self._set_state(msg, error=True, retry=lambda c=card: self.toggle_preview(c) if c in self.cards else None,
+                            error_summary="미리 듣기를 재생하지 못했어요. 인터넷과 스피커 연결을 확인하고 다시 해 주세요.")
         except RuntimeError:
             pass
 
@@ -605,7 +608,9 @@ class YoutubeDialog(BaseDialog):
         try:
             edit = self._dl_edit
             self._dl_reset()
-            self._set_state(msg, error=True, retry=lambda: self.download(edit=edit))
+            self._set_state(msg, error=True, retry=lambda: self.download(edit=edit),
+                            error_summary="종소리를 받지 못했어요. 인터넷 연결을 확인하고 다시 해 주세요. "
+                                          "로그인 안내가 나오면 구글 로그인 후 다시 받아 주세요.")
         except RuntimeError:
             pass
 
@@ -639,7 +644,8 @@ class YoutubeDialog(BaseDialog):
             else:
                 self.result_id = sound_files.add_sound_from_file(self.ctx.conn, src, name, 1.0)
         except Exception as e:
-            self._set_state(f"추가하지 못했어요: {e}", error=True)
+            self._set_state(str(e), error=True, error_summary=
+                            "종소리를 추가하지 못했어요. 파일이 다른 프로그램에서 열려 있으면 닫고 다시 해 주세요.")
             return
         finally:
             try:

@@ -1,4 +1,4 @@
-APP_VERSION = "2.2.11"
-APP_TITLE = "마고수학학원 타종 프로그램"
-APP_SHORT = "Mapl Tajong"
+APP_VERSION = "2.2.12"
+APP_TITLE = "마고 타종"
+APP_SHORT = "마고 타종"
 DEVELOPER = "구현민"

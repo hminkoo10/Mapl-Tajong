@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollAre
 from app.core.timeutil import ampm, ampm_parts, format_remaining
 from app.core.version import DEVELOPER
 from app.data import repo
+from app.ui.messages import error_message
 from app.ui.select import Select
 from app.ui.theme import C, font, qc
 from app.ui.widgets import (ActionTile, Button, Card, CountdownRing, CountUpLabel, EqualizerBars, RollingClock,
@@ -52,7 +53,7 @@ def remain_words(sec):
 
 
 UNDOABLE = {"will_skip": "SKIP_ONCE", "rang_early": "FIRED_ONCE"}
-UNDO_LABEL = {"will_skip": "울리기", "rang_early": "제때 울리기"}
+UNDO_LABEL = {"will_skip": "건너뛰기 취소", "rang_early": "제때 울리기"}
 
 
 class TodayList(TickingWidget):
@@ -568,7 +569,7 @@ class DashboardPage(QWidget):
             req = sync.request_ring(schedule_id=ev.schedule_id,
                                     ring_here=(lambda: self.sch.ring_event(ev)) if ringing else None)
             if not ringing:
-                self.ctx.toast(f"{ev.name} 종을 3초 뒤 종을 울리는 기기에서 울려요", "bell", 4000)
+                self.ctx.toast(f"3초 뒤 {ev.name} 종이 울려요 (종을 울리는 기기에서)", "bell", 4000)
                 return
 
             def undo():
@@ -639,7 +640,8 @@ class DashboardPage(QWidget):
             self.sch.ring_sound(s)
             self.eq.set_active(True)
         except Exception as e:
-            self.ctx.toast(str(e), "error")
+            self.ctx.toast(error_message(
+                "종소리를 울리지 못했어요. 스피커 연결과 종소리 파일을 확인하고 다시 해 주세요.", e), "error", 6000)
 
     def on_stop(self):
         self.ctx.player.stop()

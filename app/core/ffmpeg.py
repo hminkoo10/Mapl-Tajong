@@ -50,7 +50,7 @@ def available():
 def _run(args, timeout=300, capture_stdout=True):
     exe = ffmpeg_exe()
     if not exe:
-        raise FfmpegError("ffmpeg를 찾을 수 없습니다.")
+        raise FfmpegError("소리를 변환하는 데 필요한 도구(ffmpeg)를 찾을 수 없어요.")
     cmd = [exe, "-hide_banner", "-nostdin", *args]
     try:
         r = subprocess.run(
@@ -62,7 +62,7 @@ def _run(args, timeout=300, capture_stdout=True):
             creationflags=_NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
-        raise FfmpegError("ffmpeg 처리 시간이 초과되었습니다.")
+        raise FfmpegError("소리를 변환하는 데 너무 오래 걸려 멈췄어요.")
     return r
 
 
@@ -92,7 +92,7 @@ def decode_mono(path, rate=8000):
     r = _run(["-i", str(path), "-vn", "-ac", "1", "-ar", str(rate), "-f", "s16le", "-acodec", "pcm_s16le", "-"],
              timeout=180)
     if r.returncode != 0:
-        raise FfmpegError("오디오를 읽을 수 없습니다.\n" + _tail(r.stderr))
+        raise FfmpegError("종소리 파일을 읽을 수 없어요.\n" + _tail(r.stderr))
     data = array("h")
     raw = r.stdout or b""
     if len(raw) % 2:
@@ -111,7 +111,7 @@ def render(src, dst, audio_filter=None, rate=44100, channels=2):
     args += ["-ar", str(rate), "-ac", str(channels), "-c:a", "pcm_s16le", "-f", "wav", str(dst)]
     r = _run(args, timeout=600, capture_stdout=False)
     if r.returncode != 0 or not Path(dst).exists():
-        raise FfmpegError("오디오 변환에 실패했습니다.\n" + _tail(r.stderr))
+        raise FfmpegError("종소리 파일을 변환하지 못했어요.\n" + _tail(r.stderr))
     return Path(dst)
 
 

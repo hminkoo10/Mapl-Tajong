@@ -5,6 +5,7 @@ from app.core import cloud_sync
 from app.core.backup import RESULT_LABELS, export_logs_csv
 from app.ui import icons
 from app.ui.dialogs import notify
+from app.ui.messages import error_message
 from app.ui.select import Select
 from app.ui.tables import PillDelegate, SmartTable
 from app.ui.theme import C
@@ -190,6 +191,7 @@ class LogsPage(QWidget):
         try:
             export_logs_csv(self._rows, path)
         except Exception as e:
-            notify(self, "내보내지 못했어요", str(e))
+            notify(self, "내보내지 못했어요", error_message(
+                "기록을 저장하지 못했어요. 파일이 엑셀에서 열려 있으면 닫고 다시 해 주세요.", e))
             return
         self.ctx.toast(f"{len(self._rows)}건을 저장했어요", "success")

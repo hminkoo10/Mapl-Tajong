@@ -6,10 +6,12 @@ from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from app.core import backup, ffmpeg, weather, youtube, ytpot
+from app.core.magoedu_cloud import help_url
 from app.core.paths import app_data_dir
 from app.core.version import APP_VERSION, DEVELOPER
 from app.data import repo
 from app.ui.dialogs import confirm, notify
+from app.ui.messages import error_message
 from app.ui.select import Select
 from app.ui.theme import C
 from app.ui.widgets import Button, Card, PageHeader, ToggleSwitch, hline
@@ -72,7 +74,10 @@ class SettingsPage(QWidget):
         if user:
             # 어느 통합 클라우드 아이디로 켜졌는지 (계정은 통합 클라우드에서 바꿈)
             username = user.get("username") or ""
-            host = urlparse(ctx.session.server or "").hostname or ""
+            try:
+                host = urlparse(ctx.session.server or "").hostname or ""
+            except ValueError:
+                host = ""
             gen.body.addSpacing(6)
             gen.body.addWidget(_row("로그인한 아이디",
                                     "아이디를 바꾸려면 통합 클라우드에서 로그아웃한 뒤 다시 로그인해 주세요.",
@@ -106,13 +111,13 @@ class SettingsPage(QWidget):
         fs.body.addWidget(hline())
         self.fs_theme = Select()
         self.fs_theme.setProperty("page", True)
-        self.fs_theme.addItem("어둡게", "dark")
-        self.fs_theme.addItem("밝게", "light")
+        self.fs_theme.addItem("어두운 색", "dark")
+        self.fs_theme.addItem("밝은 색", "light")
         self.fs_theme.setCurrentIndex(1 if repo.get_setting(self.conn, "fs_theme", "dark") == "light" else 0)
         self.fs_theme.setMinimumWidth(120)
         self.fs_theme.currentIndexChanged.connect(
             lambda _i: repo.set_setting(self.conn, "fs_theme", self.fs_theme.currentData()))
-        fs.body.addWidget(_row("화면 밝기", "시계 화면에서 버튼이나 T 키로도 바꿀 수 있어요.", self.fs_theme))
+        fs.body.addWidget(_row("화면 색", "시계 화면에서 버튼이나 T 키로도 바꿀 수 있어요.", self.fs_theme))
         left.addWidget(fs)
 
         bk = Card(padding=24)
@@ -137,8 +142,12 @@ class SettingsPage(QWidget):
         info.body.addSpacing(6)
         self.btn_history = Button("업데이트 기록", variant="secondary")
         info.body.addWidget(_row(f"버전 {APP_VERSION}",
-                                 "새 버전은 통합 클라우드가 받아 두고, 종이 멀 때 저절로 다시 켜져요.",
+                                 "다음 종까지 10분 넘게 남고 소리가 나지 않을 때 저절로 새 버전으로 다시 켜져요. "
+                                 "타종 창을 쓰는 중이면 2분 동안 손대지 않을 때까지 기다려요.",
                                  self.btn_history))
+        info.body.addWidget(hline())
+        self.btn_help = Button("열기", variant="secondary")
+        info.body.addWidget(_row("사용 설명서", "마고 타종 사용법을 볼 수 있어요.", self.btn_help))
         info.body.addWidget(hline())
         info.body.addWidget(_row("만든 사람", "", _value(DEVELOPER)))
         info.body.addWidget(hline())
@@ -187,6 +196,7 @@ class SettingsPage(QWidget):
         self.btn_sched_csv.clicked.connect(self.on_sched_csv)
         self.btn_folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_data_dir()))))
         self.btn_history.clicked.connect(self._show_history)
+        self.btn_help.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(help_url(self.ctx.session))))
 
     def _on_weather_toggle(self, on):
         repo.set_setting(self.conn, "weather_on", "1" if on else "0")
@@ -248,7 +258,8 @@ class SettingsPage(QWidget):
         try:
             m = backup.export_backup(self.conn, path)
         except Exception as e:
-            notify(self, "백업하지 못했어요", str(e))
+            notify(self, "백업하지 못했어요", error_message(
+                "백업 파일을 만들지 못했어요. 저장할 폴더와 남은 공간을 확인하고 다시 해 주세요.", e))
             return
         c = m["counts"]
         self.ctx.toast(f"백업했어요 · 일정 {c.get('schedules', 0)}개, 종소리 {c.get('sounds', 0)}개", "success", 3200)
@@ -260,7 +271,8 @@ class SettingsPage(QWidget):
         try:
             m = backup.read_manifest(path)
         except backup.BackupError as e:
-            notify(self, "불러올 수 없어요", str(e))
+            notify(self, "불러올 수 없어요", error_message(
+                "백업 파일을 읽지 못했어요. 마고 타종에서 만든 백업 파일인지 확인하고 다시 골라 주세요.", e))
             return
         c = m.get("counts", {})
         if not confirm(self, "백업을 불러올까요?",
@@ -271,7 +283,8 @@ class SettingsPage(QWidget):
         try:
             backup.import_backup(self.conn, path, before_replace_files=self.ctx.player.stop)
         except Exception as e:
-            notify(self, "불러오지 못했어요", str(e))
+            notify(self, "불러오지 못했어요", error_message(
+                "백업을 불러오지 못했어요. 종소리 파일이 다른 프로그램에서 열려 있으면 닫고 다시 해 주세요.", e))
             return
         self.ctx.changed("all")
         self.ctx.toast("백업을 불러왔어요", "success")
@@ -283,6 +296,7 @@ class SettingsPage(QWidget):
         try:
             n = backup.export_schedules_csv(self.conn, path)
         except Exception as e:
-            notify(self, "내보내지 못했어요", str(e))
+            notify(self, "내보내지 못했어요", error_message(
+                "시간표를 저장하지 못했어요. 파일이 엑셀에서 열려 있으면 닫고 다시 해 주세요.", e))
             return
         self.ctx.toast(f"일정 {n}개를 저장했어요", "success")

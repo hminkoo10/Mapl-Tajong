@@ -12,6 +12,7 @@ from app.core import ffmpeg, sound_files
 from app.core.audio_edit import EditParams, build_filter, compute_peaks, suggest_trim
 from app.core.paths import sound_file_path, temp_dir
 from app.ui.dialogs import BaseDialog, _row, confirm
+from app.ui.messages import error_message
 from app.ui.theme import C, font, qc
 from app.ui.widgets import (Button, SegmentedControl, Spinner, TickingWidget, ToggleSwitch, ease_out_cubic,
                             field_label, muted_label, ticker)
@@ -439,7 +440,7 @@ class SoundEditorDialog(BaseDialog):
         self.gain_label.setFixedWidth(64)
         self.gain_label.setStyleSheet(f"font-weight: 600; color: {C.grey800};")
         self.normalize = ToggleSwitch("크기 자동 맞춤")
-        self.normalize.setToolTip("다른 종소리와 비슷한 크기가 되도록 음량을 자동으로 맞춥니다.")
+        self.normalize.setToolTip("다른 종소리와 비슷한 크기가 되도록 음량을 자동으로 맞춰요.")
 
         grid.addWidget(field_label("시작"), 0, 0)
         grid.addWidget(field_label("끝"), 0, 1)
@@ -497,7 +498,7 @@ class SoundEditorDialog(BaseDialog):
         self.resize(900, 640)
 
         if not ffmpeg.available():
-            self.loading_label.setText("ffmpeg를 찾을 수 없어 편집할 수 없습니다.")
+            self.loading_label.setText("소리를 편집하는 데 필요한 도구(ffmpeg)가 없어요. 통합 클라우드에서 프로그램을 업데이트해 주세요.")
         else:
             run_async(ffmpeg.decode_mono, str(self.src), RATE, on_done=self._loaded, on_fail=self._load_failed)
 
@@ -529,7 +530,8 @@ class SoundEditorDialog(BaseDialog):
             self.notice.show()
 
     def _load_failed(self, msg):
-        self.loading_label.setText("음원을 불러오지 못했습니다.\n" + msg[-200:])
+        self.loading_label.setText(error_message(
+            "종소리 파일을 읽지 못했어요. 파일이 열리는지 확인하고 다시 골라 주세요.", msg))
 
     # ---------- 동기화 ----------
     def _from_wave(self, a, b):
@@ -612,12 +614,14 @@ class SoundEditorDialog(BaseDialog):
                 self._play_len = params.length(dur)
                 self._ph.subscribe(self)
             except Exception as e:
-                self.show_error(str(e))
+                self.show_error(error_message(
+                    "미리 듣기를 재생하지 못했어요. 스피커 연결을 확인하고 다시 해 주세요.", e))
 
         def fail(msg):
             try:
                 self.btn_play.setEnabled(True)
-                self.show_error("미리듣기를 만들지 못했어요: " + msg[-160:])
+                self.show_error(error_message(
+                    "미리 듣기를 만들지 못했어요. 종소리 파일이 열리는지 확인하고 다시 해 주세요.", msg))
             except RuntimeError:
                 pass
 
@@ -701,7 +705,8 @@ class SoundEditorDialog(BaseDialog):
                 self.btn_ok.setEnabled(True)
                 self.btn_ok.setText("저장")
                 self.btn_cancel.setEnabled(True)
-                self.show_error("저장하지 못했어요: " + str(msg)[-200:])
+                self.show_error(error_message(
+                    "종소리를 저장하지 못했어요. 파일이 다른 프로그램에서 열려 있으면 닫고 다시 해 주세요.", msg))
             except RuntimeError:
                 pass
 

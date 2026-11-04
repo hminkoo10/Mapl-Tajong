@@ -7,6 +7,7 @@ from app.core import sound_files
 from app.core.paths import sound_file_path
 from app.data import repo
 from app.ui.dialogs import SoundInfoDialog, confirm, notify
+from app.ui.messages import error_message
 from app.ui.select import Menu
 from app.ui.sound_editor import open_editor_for_sound
 from app.ui.tables import PillDelegate, SmartTable, TextDelegate
@@ -25,12 +26,12 @@ class SoundsPage(QWidget):
         root.setContentsMargins(28, 26, 28, 20)
         root.setSpacing(16)
 
-        header = PageHeader("종소리", "파일을 넣거나 YouTube에서 찾아 받고, 필요한 부분만 잘라 쓸 수 있어요.")
+        header = PageHeader("종소리", "파일을 넣거나 인터넷에서 찾아 받고, 필요한 부분만 잘라 쓸 수 있어요.")
         root.addWidget(header)
 
         bar = QHBoxLayout()
         bar.setSpacing(8)
-        self.btn_yt = Button("YouTube에서 찾기", icon_name="search", variant="primary")
+        self.btn_yt = Button("인터넷에서 찾기", icon_name="search", variant="primary")
         self.btn_add = Button("파일 추가", variant="white")
         bar.addWidget(self.btn_yt)
         bar.addWidget(self.btn_add)
@@ -178,7 +179,8 @@ class SoundsPage(QWidget):
 
         def fail(msg):
             self.btn_add.setEnabled(True)
-            notify(self, "추가하지 못했어요", msg)
+            notify(self, "추가하지 못했어요", error_message(
+                "종소리를 추가하지 못했어요. 파일이 열리는지 확인하고 다시 골라 주세요.", msg))
 
         run_async(sound_files.import_file, path, on_done=done, on_fail=fail)
 
@@ -226,7 +228,8 @@ class SoundsPage(QWidget):
             self.ctx.player.play(str(sound_file_path(str(s["file_name"]))), float(s["volume"]), str(s["name"]))
             self.eq.set_active(True)
         except Exception as e:
-            notify(self, "재생하지 못했어요", str(e))
+            notify(self, "재생하지 못했어요", error_message(
+                "종소리를 재생하지 못했어요. 스피커 연결과 종소리 파일을 확인하고 다시 해 주세요.", e))
 
     def on_stop(self):
         self.ctx.player.stop()
@@ -244,6 +247,6 @@ class SoundsPage(QWidget):
             m.addSeparator()
             m.addAction("삭제", self.on_delete)
             m.addSeparator()
-        m.addAction("YouTube에서 찾기", self.on_youtube)
+        m.addAction("인터넷에서 찾기", self.on_youtube)
         m.addAction("파일 추가", self.on_add)
         m.exec(self.table.viewport().mapToGlobal(pos))

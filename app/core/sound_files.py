@@ -99,14 +99,14 @@ def import_file(src):
     """파일을 종소리 폴더로 복사(필요하면 wav로 변환)하고 그 경로를 돌려준다. 오래 걸릴 수 있어 작업 스레드용."""
     src = Path(src)
     if not src.exists():
-        raise FileNotFoundError("선택한 파일을 찾을 수 없습니다.")
+        raise FileNotFoundError("선택한 파일을 찾을 수 없어요.")
     stem = safe_stem(src.stem)
     if src.suffix.lower() in PLAYABLE_EXTS:
         dst = unique_path(stem, src.suffix.lower())
         copy_atomic(src, dst)
     else:
         if not ffmpeg.available():
-            raise RuntimeError("이 형식은 변환이 필요한데 ffmpeg를 찾을 수 없습니다. wav/mp3/ogg 파일을 사용해 주세요.")
+            raise RuntimeError("이 형식은 변환이 필요한데 ffmpeg를 찾을 수 없어요. wav/mp3/ogg 파일을 사용해 주세요.")
         dst = unique_path(stem, ".wav")
         write_atomic(dst, lambda tmp: ffmpeg.render(src, tmp))
     return dst

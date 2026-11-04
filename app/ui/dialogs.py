@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLay
                              QMainWindow, QScrollArea, QSlider, QSpinBox, QTimeEdit, QVBoxLayout, QWidget)
 
 from app.core.timeutil import ampm, mask_to_days
+from app.ui.messages import error_message
 from app.ui.select import Select
 from app.ui.timepicker import TimePicker
 from app.ui.theme import C, paint_soft_shadow, qc
@@ -371,7 +372,8 @@ class ScheduleDialog(BaseDialog):
             self.ctx.player.play(str(sound_file_path(str(s["file_name"]))), float(s["volume"]) if v is None else v,
                                  str(s["name"]))
         except Exception as e:
-            self.show_error(str(e))
+            self.show_error(error_message(
+                "종소리를 재생하지 못했어요. 스피커 연결과 종소리 파일을 확인하고 다시 해 주세요.", e))
 
     def validate(self):
         if not self.name_edit.text().strip():

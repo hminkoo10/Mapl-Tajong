@@ -31,7 +31,6 @@ from app.ui.main_window import MainWindow
 from app.ui.theme import app_font, build_stylesheet, load_fonts, reset_font_cache
 
 APP_ID = "tajong"
-CLOUD_URL = "https://mago.milky.kr"
 
 
 def read_schema():
@@ -93,7 +92,7 @@ def _without_cloud():
     box.addButton("닫기", QMessageBox.ButtonRole.RejectRole)
     box.exec()
     if box.clickedButton() is get:
-        QDesktopServices.openUrl(QUrl(CLOUD_URL))
+        QDesktopServices.openUrl(QUrl(cloud.DEFAULT_SERVER))
 
 
 def _ask_first_sync():
@@ -123,7 +122,7 @@ def main():
 
     ok = acquire(APP_NAME, app_data_dir())
     if not ok:
-        QMessageBox.information(None, "알림", "이미 프로그램이 실행 중입니다.\n작업 표시줄 오른쪽 트레이 아이콘을 확인해 주세요.")
+        QMessageBox.information(None, "알림", "이미 프로그램이 켜져 있어요.\n작업 표시줄 오른쪽 트레이 아이콘을 확인해 주세요.")
         return
 
     load_fonts(asset_path("fonts"))

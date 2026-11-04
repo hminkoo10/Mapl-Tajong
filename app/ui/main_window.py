@@ -1,8 +1,8 @@
 import re
 from datetime import datetime
 
-from PyQt6.QtCore import QDateTime, Qt, QTimer
-from PyQt6.QtGui import QAction, QCursor, QIcon
+from PyQt6.QtCore import QDateTime, Qt, QTimer, QUrl
+from PyQt6.QtGui import QAction, QCursor, QDesktopServices, QIcon
 from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QSystemTrayIcon, QWidget
 
 from app.core import cloud_sync
@@ -11,7 +11,7 @@ from app.core.paths import asset_path, sync_dir
 from app.core.player import SoundPlayer
 from app.core.scheduler import Scheduler
 from app.core.timeutil import ampm
-from app.core.version import APP_TITLE, APP_VERSION
+from app.core.version import APP_SHORT, APP_TITLE, APP_VERSION
 from app.data import repo
 from app.ui import icons
 from app.ui.cloud_update import RestartWatch
@@ -86,9 +86,12 @@ class MainWindow(QMainWindow):
 
         btn_full = Button("전체화면 시계", variant="secondary")
         btn_full.clicked.connect(self.open_fullscreen)
+        btn_help = Button("도움말", variant="secondary")
+        btn_help.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(cloud.help_url(self.ctx.session))))
         btn_exit = Button("프로그램 끄기", variant="subtle")
         btn_exit.clicked.connect(self.on_exit_app)
         self.nav.footer.addWidget(btn_full)
+        self.nav.footer.addWidget(btn_help)
         self.nav.footer.addWidget(btn_exit)
 
         self.ctx.toasts = ToastManager(central)
@@ -134,7 +137,7 @@ class MainWindow(QMainWindow):
 
     def _init_tray(self):
         self.tray = QSystemTrayIcon(self._app_icon(), self)
-        self.tray.setToolTip("Mapl Tajong")
+        self.tray.setToolTip(APP_SHORT)
         menu = Menu()
         for text, ic, fn in (("열기", "dashboard", self._tray_show), ("숨기기", "x", self.hide),
                              ("전체화면 시계", "fullscreen", self.open_fullscreen)):
@@ -142,7 +145,7 @@ class MainWindow(QMainWindow):
             a.triggered.connect(fn)
             menu.addAction(a)
         menu.addSeparator()
-        a = QAction(icons.icon("power", C.danger), "종료", self)
+        a = QAction(icons.icon("power", C.danger), "프로그램 끄기", self)
         a.triggered.connect(self.on_exit_app)
         menu.addAction(a)
         self._tray_menu = menu
@@ -184,7 +187,7 @@ class MainWindow(QMainWindow):
         ev = self.scheduler.next_event
         nxt = (ev.run_at - datetime.now()).total_seconds() if ev else None
         self.player.idle_tick(nxt)
-        tip = f"Mapl Tajong\n다음: {ampm(ev.run_at)} {ev.name}" if ev else "Mapl Tajong\n예정된 종 없음"
+        tip = f"{APP_SHORT}\n다음: {ampm(ev.run_at)} {ev.name}" if ev else f"{APP_SHORT}\n예정된 종 없음"
         if tip != self._tooltip:
             self._tooltip = tip
             self.tray.setToolTip(tip)
