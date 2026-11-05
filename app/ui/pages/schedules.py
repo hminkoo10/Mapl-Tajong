@@ -119,7 +119,7 @@ class SchedulesPage(QWidget):
         root.setContentsMargins(28, 26, 28, 20)
         root.setSpacing(16)
 
-        header = PageHeader("시간표", "세트마다 종 치는 시간을 정해요.")
+        header = PageHeader("시간표", " ")
         self.set_combo = page_field(Select())
         self.set_combo.setMinimumWidth(170)
         header.right.addWidget(self.set_combo)
@@ -161,7 +161,7 @@ class SchedulesPage(QWidget):
         e1 = QLabel("아직 일정이 없어요")
         e1.setAlignment(Qt.AlignmentFlag.AlignCenter)
         e1.setStyleSheet(f"color: {C.grey800}; font-size: 17px; font-weight: 700;")
-        e2 = QLabel("‘일정 추가’를 눌러 첫 종을 만들어 보세요")
+        e2 = QLabel("")
         e2.setAlignment(Qt.AlignmentFlag.AlignCenter)
         e2.setStyleSheet(f"color: {C.grey500}; font-size: 14px;")
         el.addWidget(e1)
@@ -276,7 +276,7 @@ class SchedulesPage(QWidget):
     def on_add(self):
         sounds = repo.list_sounds(self.conn)
         if not sounds:
-            notify(self, "종소리가 없어요", "종소리를 먼저 추가해 주세요.")
+            notify(self, "종소리가 없어요", "종소리를 추가해요.")
             return
         dlg = ScheduleDialog(self.ctx, sounds, None, self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -405,7 +405,7 @@ class SchedulesPage(QWidget):
         try:
             sid = repo.insert_schedule_set(self.conn, name)
         except Exception:
-            notify(self, "이미 있는 이름이에요", "다른 이름을 입력해 주세요.")
+            notify(self, "이미 있는 이름이에요", "다른 이름을 입력해요.")
             return
         repo.set_active_set(self.conn, sid)
         self.ctx.changed("sets")
@@ -420,7 +420,7 @@ class SchedulesPage(QWidget):
         try:
             sid = repo.duplicate_schedule_set(self.conn, cur_id, name)
         except Exception:
-            notify(self, "이미 있는 이름이에요", "다른 이름을 입력해 주세요.")
+            notify(self, "이미 있는 이름이에요", "다른 이름을 입력해요.")
             return
         repo.set_active_set(self.conn, sid)
         self.ctx.changed("sets")
@@ -434,7 +434,7 @@ class SchedulesPage(QWidget):
         try:
             repo.rename_schedule_set(self.conn, sid, name)
         except Exception:
-            notify(self, "이미 있는 이름이에요", "다른 이름을 입력해 주세요.")
+            notify(self, "이미 있는 이름이에요", "다른 이름을 입력해요.")
             return
         self.ctx.changed("sets")
 

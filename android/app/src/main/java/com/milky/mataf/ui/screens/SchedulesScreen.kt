@@ -101,7 +101,7 @@ fun SchedulesScreen(onSelectionBarHeightChanged: (Dp) -> Unit = {}) {
 
     Box(Modifier.fillMaxSize()) {
         Page(14.dp) {
-            PageHeader("시간표", "세트마다 종 치는 시간을 정해요.")
+            PageHeader("시간표", " ")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Select(sets.map { it.id to "${it.name}  (${it.count})" }, activeId, {
                     repo.setActiveSet(it); selected.clear(); changed(ctx)
@@ -139,7 +139,7 @@ fun SchedulesScreen(onSelectionBarHeightChanged: (Dp) -> Unit = {}) {
                 }
             }
             Card(padding = 8.dp) {
-                if (all.isEmpty()) Empty("아직 일정이 없어요", "‘일정 추가’로 첫 종을 정해 보세요")
+                if (all.isEmpty()) Empty("아직 일정이 없어요", " ")
                 else if (rows.isEmpty()) Empty("찾는 일정이 없어요")
                 rows.forEachIndexed { i, s ->
                     if (i > 0) Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(1.dp).background(C.grey100))
@@ -259,9 +259,9 @@ fun ScheduleEditor(
     var volume by remember { mutableStateOf(((data?.volumeOverride ?: 1.0) * 100).toInt()) }
     var enabled by remember { mutableStateOf(data?.enabled ?: true) }
     val error = when {
-        name.isBlank() -> "이름을 입력해 주세요."
-        mask == 0 -> "요일을 하나 이상 골라 주세요."
-        soundId == null -> "종소리를 골라 주세요."
+        name.isBlank() -> "이름을 입력해요."
+        mask == 0 -> "요일을 하나 이상 골라요."
+        soundId == null -> "종소리를 골라요."
         else -> null
     }
     AppSheet(if (data == null) "일정 추가" else "일정 수정", onDismiss, footer = {
@@ -354,7 +354,7 @@ private fun BatchEditor(count: Int, sets: List<Pair<Long, String>>, onDismiss: (
             if (useVolume) VolumeSlider(volume) { volume = it }
         }
         Column {
-            ToggleRow("이름 바꾸기", "찾을 글자를 바꿀 글자로", checked = useName, onChange = { useName = it })
+            ToggleRow("이름 바꾸기", " ", checked = useName, onChange = { useName = it })
             if (useName) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Field(find, { find = it }, Modifier.weight(1f), placeholder = "찾을 글자")
                 Field(replace, { replace = it }, Modifier.weight(1f), placeholder = "바꿀 글자")

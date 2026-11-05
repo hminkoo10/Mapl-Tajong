@@ -342,7 +342,7 @@ class SoundEditorDialog(BaseDialog):
     """mode='new': 새 종소리로 등록 (YouTube/파일), mode='existing': 기존 종소리 편집"""
 
     def __init__(self, ctx, src_path, name="", mode="new", sound_row=None, parent=None):
-        super().__init__("종소리 다듬기", "필요한 부분만 남기고, 시작과 끝을 부드럽게 만들어요.", None, parent, 820)
+        super().__init__("종소리 다듬기", " ", None, parent, 820)
         self.ctx = ctx
         self.src = Path(src_path)
         self.mode = mode
@@ -402,7 +402,7 @@ class SoundEditorDialog(BaseDialog):
 
         zr = QHBoxLayout()
         zr.setSpacing(6)
-        hint = muted_label("끌어서 구간을 고르고, 양 끝을 잡아 조절해요. 오른쪽 클릭하면 그 자리부터 들려줘요.")
+        hint = muted_label("양 끝을 끌어 남길 구간을 정해요.")
         hint.setStyleSheet(f"color: {C.grey400}; font-size: 12.5px;")
         zr.addWidget(hint)
         zr.addStretch(1)
@@ -440,7 +440,7 @@ class SoundEditorDialog(BaseDialog):
         self.gain_label.setFixedWidth(64)
         self.gain_label.setStyleSheet(f"font-weight: 600; color: {C.grey800};")
         self.normalize = ToggleSwitch("크기 자동 맞춤")
-        self.normalize.setToolTip("다른 종소리와 비슷한 크기가 되도록 음량을 자동으로 맞춰요.")
+        self.normalize.setToolTip("다른 종소리와 음량을 맞춰요.")
 
         grid.addWidget(field_label("시작"), 0, 0)
         grid.addWidget(field_label("끝"), 0, 1)
@@ -498,7 +498,7 @@ class SoundEditorDialog(BaseDialog):
         self.resize(900, 640)
 
         if not ffmpeg.available():
-            self.loading_label.setText("소리를 편집하는 데 필요한 도구(ffmpeg)가 없어요. 통합 클라우드에서 프로그램을 업데이트해 주세요.")
+            self.loading_label.setText("통합 클라우드에서 프로그램을 업데이트해요. 소리 편집 도구가 없어요.")
         else:
             run_async(ffmpeg.decode_mono, str(self.src), RATE, on_done=self._loaded, on_fail=self._load_failed)
 
@@ -526,12 +526,12 @@ class SoundEditorDialog(BaseDialog):
             a, _ = suggest_trim(samples[: int(RATE * min(d, 120))], RATE)
             self.wave.set_selection(a, min(d, a + 10.0), emit=True)
             self.fade_out.setValue(1.0)
-            self.notice.setText("긴 음원이라 소리가 시작되는 앞부분 10초를 먼저 골라 두었어요. 핸들을 끌어 바꿀 수 있어요.")
+            self.notice.setText("소리가 시작되는 앞부분 10초를 골랐어요.")
             self.notice.show()
 
     def _load_failed(self, msg):
         self.loading_label.setText(error_message(
-            "종소리 파일을 읽지 못했어요. 파일이 열리는지 확인하고 다시 골라 주세요.", msg))
+            "파일이 열리는지 확인한 뒤 다시 골라요.", msg))
 
     # ---------- 동기화 ----------
     def _from_wave(self, a, b):
@@ -615,13 +615,13 @@ class SoundEditorDialog(BaseDialog):
                 self._ph.subscribe(self)
             except Exception as e:
                 self.show_error(error_message(
-                    "미리 듣기를 재생하지 못했어요. 스피커 연결을 확인하고 다시 해 주세요.", e))
+                    "스피커 연결을 확인한 뒤 다시 들어요.", e))
 
         def fail(msg):
             try:
                 self.btn_play.setEnabled(True)
                 self.show_error(error_message(
-                    "미리 듣기를 만들지 못했어요. 종소리 파일이 열리는지 확인하고 다시 해 주세요.", msg))
+                    "종소리 파일이 열리는지 확인해요.", msg))
             except RuntimeError:
                 pass
 
@@ -650,7 +650,7 @@ class SoundEditorDialog(BaseDialog):
         if self._loading:
             return "아직 음원을 불러오는 중이에요."
         if not self.name_edit.text().strip():
-            return "이름을 입력해 주세요."
+            return "이름을 입력해요."
         if self.wave.sel1 - self.wave.sel0 < 0.1:
             return "구간이 너무 짧아요."
         return None
@@ -665,7 +665,7 @@ class SoundEditorDialog(BaseDialog):
         params = self.params()
         dur = self.wave.duration
         overwrite = self.save_mode is not None and self.save_mode.current() == 1
-        if overwrite and not confirm(self, "원래 파일에 덮어쓸까요?", "원본은 따로 보관해 두니까 나중에 되돌릴 수 있어요.",
+        if overwrite and not confirm(self, "원래 파일에 덮어쓸까요?", "원본을 보관해 되돌릴 수 있어요.",
                                      "덮어쓰기", danger=False):
             return
         self.btn_ok.setEnabled(False)
@@ -706,7 +706,7 @@ class SoundEditorDialog(BaseDialog):
                 self.btn_ok.setText("저장")
                 self.btn_cancel.setEnabled(True)
                 self.show_error(error_message(
-                    "종소리를 저장하지 못했어요. 파일이 다른 프로그램에서 열려 있으면 닫고 다시 해 주세요.", msg))
+                    "다른 프로그램에서 파일을 닫고 다시 저장해요.", msg))
             except RuntimeError:
                 pass
 

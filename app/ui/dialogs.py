@@ -323,7 +323,7 @@ class ScheduleDialog(BaseDialog):
             b = Button(txt, variant="secondary", size="sm")
             b.clicked.connect(lambda _=False, m=mins: self.time_edit.add_minutes(m))
             qrow.addWidget(b)
-        hint = QLabel("칸을 누르고 숫자를 바로 쳐도 돼요")
+        hint = QLabel("")
         hint.setStyleSheet(f"color: {C.grey500}; font-size: 12.5px;")
         qrow.addSpacing(6)
         qrow.addWidget(hint)
@@ -373,15 +373,15 @@ class ScheduleDialog(BaseDialog):
                                  str(s["name"]))
         except Exception as e:
             self.show_error(error_message(
-                "종소리를 재생하지 못했어요. 스피커 연결과 종소리 파일을 확인하고 다시 해 주세요.", e))
+                "스피커 연결과 종소리 파일을 확인해요.", e))
 
     def validate(self):
         if not self.name_edit.text().strip():
-            return "이름을 입력해 주세요."
+            return "이름을 입력해요."
         if self.days.mask() == 0:
-            return "요일을 하나 이상 골라 주세요."
+            return "요일을 하나 이상 골라요."
         if self.sound_combo.currentData() is None:
-            return "종소리를 골라 주세요."
+            return "종소리를 골라요."
         return None
 
     def get_value(self):
@@ -432,7 +432,7 @@ class _Section(QWidget):
 class BatchEditDialog(BaseDialog):
     def __init__(self, ctx, rows, sounds, sets, current_set_id, parent=None):
         n = len(rows)
-        super().__init__(f"일정 {n}개 한 번에 바꾸기", "바꿀 항목만 켜 주세요. 나머지는 그대로 둬요.", None, parent, 540)
+        super().__init__(f"일정 {n}개 한 번에 바꾸기", "켠 항목만 바꿔요.", None, parent, 540)
         self.rows = rows
         self.btn_ok.setText("바꾸기")
 
@@ -457,7 +457,7 @@ class BatchEditDialog(BaseDialog):
 
         self.seg_enabled = SegmentedControl(["켜기", "끄기"], compact=True)
         self.seg_enabled.changed.connect(self._update_summary)
-        self.sec_enabled = _Section("사용 여부", "일정을 켜거나 꺼요", self.seg_enabled, self._update_summary)
+        self.sec_enabled = _Section("사용 여부", "", self.seg_enabled, self._update_summary)
 
         dl = QVBoxLayout()
         dl.setSpacing(10)
@@ -467,7 +467,7 @@ class BatchEditDialog(BaseDialog):
         self.days.maskChanged.connect(self._update_summary)
         dl.addWidget(self.seg_days)
         dl.addWidget(self.days)
-        self.sec_days = _Section("요일", "요일을 바꾸거나 더하고 빼요", dl, self._update_summary)
+        self.sec_days = _Section("요일", "", dl, self._update_summary)
 
         tw = QWidget()
         twl = QVBoxLayout(tw)
@@ -488,16 +488,16 @@ class BatchEditDialog(BaseDialog):
         tl.addStretch(1)
         twl.addLayout(tl)
         twl.addWidget(muted_label("자정을 넘기면 요일도 같이 바뀌어요.", wrap=True))
-        self.sec_shift = _Section("시간 옮기기", "전부 같은 만큼 당기거나 미뤄요", tw, self._update_summary)
+        self.sec_shift = _Section("시간 옮기기", "같은 시간만큼 옮겨요.", tw, self._update_summary)
 
         self.sound_combo = _sound_combo(sounds)
         self.sound_combo.currentIndexChanged.connect(self._update_summary)
-        self.sec_sound = _Section("종소리", "모두 같은 종소리로 바꿔요", self.sound_combo, self._update_summary)
+        self.sec_sound = _Section("종소리", "", self.sound_combo, self._update_summary)
 
         self.volume = VolumeField(allow_default=True)
         self.volume.slider.valueChanged.connect(self._update_summary)
         self.volume.use_default.toggled.connect(self._update_summary)
-        self.sec_volume = _Section("음량", "일정마다 쓰는 음량이에요", self.volume, self._update_summary)
+        self.sec_volume = _Section("음량", "", self.volume, self._update_summary)
 
         nl = QGridLayout()
         nl.setHorizontalSpacing(8)
@@ -512,7 +512,7 @@ class BatchEditDialog(BaseDialog):
         arrow.setStyleSheet(f"color: {C.grey400};")
         nl.addWidget(arrow, 0, 1)
         nl.addWidget(self.repl_edit, 0, 2)
-        self.sec_name = _Section("이름", "이름 일부를 찾아 바꿔요", nl, self._update_summary)
+        self.sec_name = _Section("이름", "", nl, self._update_summary)
 
         self.set_combo = Select()
         for s in sets:
@@ -521,7 +521,7 @@ class BatchEditDialog(BaseDialog):
         if i >= 0:
             self.set_combo.setCurrentIndex(i)
         self.set_combo.currentIndexChanged.connect(self._update_summary)
-        self.sec_set = _Section("세트 옮기기", "다른 세트로 옮겨요", self.set_combo, self._update_summary)
+        self.sec_set = _Section("세트 옮기기", "", self.set_combo, self._update_summary)
         self.current_set_id = int(current_set_id)
 
         self.sections = [self.sec_enabled, self.sec_days, self.sec_shift, self.sec_sound, self.sec_volume,
@@ -563,7 +563,7 @@ class BatchEditDialog(BaseDialog):
 
     def validate(self):
         if self.sec_days.active() and self.days.mask() == 0:
-            return "요일을 하나 이상 골라 주세요."
+            return "요일을 하나 이상 골라요."
         return None
 
     def get_changes(self):
@@ -631,7 +631,7 @@ class SoundInfoDialog(BaseDialog):
 
     def __init__(self, ctx, name="", volume=1.0, pick_file=False, parent=None):
         super().__init__("종소리 추가" if pick_file else "이름과 음량",
-                         "wav, mp3, ogg 같은 음원 파일을 넣을 수 있어요." if pick_file else "", None, parent, 460)
+                         "wav·mp3·ogg 등 음원 파일을 넣어요." if pick_file else "", None, parent, 460)
         self.ctx = ctx
         self.selected_path = None
         self.pick_file = pick_file
@@ -665,9 +665,9 @@ class SoundInfoDialog(BaseDialog):
 
     def validate(self):
         if self.pick_file and not self.selected_path:
-            return "파일을 골라 주세요."
+            return "파일을 골라요."
         if not self.pick_file and not self.name_edit.text().strip():
-            return "이름을 입력해 주세요."
+            return "이름을 입력해요."
         return None
 
     def get_value(self):
@@ -685,7 +685,7 @@ class TextInputDialog(BaseDialog):
         QTimer.singleShot(0, self.edit.setFocus)
 
     def validate(self):
-        return None if self.edit.text().strip() else "내용을 입력해 주세요."
+        return None if self.edit.text().strip() else "내용을 입력해요."
 
     def value(self):
         return self.edit.text().strip()
@@ -723,9 +723,8 @@ def notify(parent, title, text, icon_name=None):
 def choose_first_sync(parent=None):
     """처음 연결할 때 클라우드 시간표와 이 컴퓨터 시간표가 다르면 무엇을 쓸지. 'cloud'(기본) 또는 'local'."""
     d = BaseDialog("클라우드에 이미 시간표가 있어요", "", None, parent, 480)
-    lbl = QLabel("이 컴퓨터에서 따로 쓰던 시간표와 달라요. 어느 쪽을 쓸까요?\n\n"
-                 "· 클라우드 시간표 쓰기: 이 컴퓨터 시간표는 백업 파일로 남겨 둬요.\n"
-                 "· 이 컴퓨터 시간표로 바꾸기: 같은 아이디로 연결한 다른 기기도 이 시간표로 바뀌어요.")
+    lbl = QLabel("클라우드 선택: 이 컴퓨터 시간표는 백업해요.\n"
+                 "이 컴퓨터 선택: 같은 아이디의 모든 기기 시간표가 바뀌어요.")
     lbl.setWordWrap(True)
     lbl.setStyleSheet(f"font-size: 15px; color: {C.grey700};")
     lbl.ensurePolished()

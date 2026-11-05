@@ -113,7 +113,7 @@ class ManualBellLogTests(fixtures.Base):
             DashboardPage.on_play_selected(self.page)
         self.assertEqual([(r["result"], r["detail"]) for r in self.rows()], [("FAILED", "forced · 파일 없음")])
         self.page.ctx.toast.assert_called_once_with(
-            "종소리를 울리지 못했어요. 스피커 연결과 종소리 파일을 확인하고 다시 해 주세요.\n\n자세한 내용: 파일 없음",
+            "스피커 연결과 종소리 파일을 확인해요.\n\n자세한 내용: 파일 없음",
             "error", 6000)
         self.page.eq.set_active.assert_not_called()
         self.device.sch.on_event.assert_called_once()

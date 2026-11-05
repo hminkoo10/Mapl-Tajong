@@ -91,7 +91,7 @@ class ChangelogDialog(BaseDialog):
         entries = load_changelog()
         if only_version:
             entries = [e for e in entries if e[0] == only_version] or entries[:1]
-        super().__init__(title or "업데이트 기록", "버전마다 무엇이 바뀌었는지 볼 수 있어요." if not only_version else "",
+        super().__init__(title or "업데이트 기록", " " if not only_version else "",
                          None, parent, 560)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

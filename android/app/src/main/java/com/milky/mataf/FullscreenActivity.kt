@@ -306,7 +306,7 @@ private fun WeatherNow(d: WxData?, failed: Boolean, th: FsTheme, px: Dp, onClick
     val fontScale = LocalDensity.current.fontScale
     fun sp(x: Dp): Int = (x.value / fontScale).toInt().coerceAtLeast(10)
     if (d == null) {
-        if (failed) Text("날씨를 불러오지 못했어요 · 눌러서 지역 확인", style = text(sp(px * 0.5f), FontWeight.Medium, th.dim),
+        if (failed) Text("눌러서 날씨 지역을 확인해요.", style = text(sp(px * 0.5f), FontWeight.Medium, th.dim),
             modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(6.dp))
         return
     }

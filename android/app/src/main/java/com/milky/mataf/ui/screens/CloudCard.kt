@@ -77,7 +77,7 @@ fun CloudCard() {
     val scope = rememberCoroutineScope()
 
     if (askLogout) ConfirmDialog("클라우드에서 로그아웃할까요?",
-        "다시 로그인할 때까지 이 기기에서 종이 울리지 않고 앱도 쓸 수 없어요. 이 기기의 시간표와 종소리는 그대로 남아요.", "로그아웃", {
+        "다시 로그인할 때까지 앱·타종이 멈춰요. 시간표·종소리는 남아요.", "로그아웃", {
             scope.launch(NonCancellable) { Cloud.logout() }
         }, { askLogout = false }, danger = true)
 
@@ -95,8 +95,8 @@ fun CloudCard() {
             modifier = Modifier.padding(bottom = 8.dp))
         Divider()
         ToggleRow("이 기기에서 종 울리기",
-            if (ring) "정해진 시각에 이 기기에서 울려요. 어느 기기에서든 ‘지금 울리기’를 누르면 함께 울려요"
-            else "이 기기에서는 울리지 않아요. ‘지금 울리기’를 누르면 종을 울리는 기기에서 울려요",
+            if (ring) "‘지금 울리기’는 모든 타종 기기에서 울려요."
+            else "‘지금 울리기’는 다른 기기에서 울려요.",
             ring, { on ->
                 ring = on
                 Cloud.setRingsHere(ctx, on)
@@ -111,8 +111,8 @@ private fun syncText(st: Cloud.Status): String {
     val conn = when (st.conn) {
         Cloud.Conn.ONLINE -> "실시간으로 연결돼 있어요"
         Cloud.Conn.CONNECTING -> "연결하고 있어요"
-        Cloud.Conn.POLLING -> "연결돼 있어요 (자주 확인해서 맞춰요)"
-        Cloud.Conn.OFFLINE -> "연결되지 않았어요. 다시 연결하고 있어요"
+        Cloud.Conn.POLLING -> "연결돼 있어요"
+        Cloud.Conn.OFFLINE -> "다시 연결하고 있어요"
         Cloud.Conn.OFF -> ""
     }
     val last = if (st.lastSync > 0) {
@@ -171,11 +171,10 @@ fun CloudGate() {
                 Column {
                     Text("마고 타종", style = text(26, FontWeight.ExtraBold))
                     Spacer(Modifier.height(6.dp))
-                    Text("마고에듀 통합 클라우드 아이디로 로그인해 주세요", style = text(16, FontWeight.SemiBold, C.grey700))
+                    Text("통합 클라우드 아이디로 로그인해요", style = text(16, FontWeight.SemiBold, C.grey700))
                 }
-                Text("마고 타종은 마고에듀 통합 클라우드 계정으로 써요. 같은 아이디로 로그인한 PC·휴대폰과 시간표·종소리·기록이 저절로 맞춰져요. " +
-                    "한 번 로그인하면 인터넷이 끊겨도 이 기기에서 종은 그대로 울려요.", style = text(14, color = C.grey600))
-                if (hasLocal) Text("이 기기에서 쓰던 시간표와 종소리는 그대로 있어요. 로그인한 뒤 클라우드 것과 다르면 어느 쪽을 쓸지 골라요.",
+                Text("같은 아이디의 모든 기기와 시간표·종소리·기록을 맞춰요.", style = text(14, color = C.grey600))
+                if (hasLocal) Text("시간표가 다르면 로그인 뒤 쓸 시간표를 골라요.",
                     style = text(14, color = C.grey600))
                 if (st.message.isNotEmpty()) Text(st.message, style = text(14, FontWeight.Medium, C.warning))
                 Card {
@@ -189,13 +188,13 @@ fun CloudGate() {
                     Field(server, { server = it }, Modifier.fillMaxWidth())
                     Spacer(Modifier.height(4.dp))
                     ToggleRow("이 기기에서 종 울리기",
-                        "교무실 PC처럼 종을 울리는 기기가 따로 있으면 꺼 두세요. 끄면 이 기기에서는 시간표를 보고 바꾸고, ‘지금 울리기’는 그 기기에 부탁해요",
+                        "끄면 ‘지금 울리기’는 다른 기기에서 울려요.",
                         ring, { ring = it })
                     if (error.isNotEmpty()) Text(error, style = text(14, FontWeight.Medium, C.danger), modifier = Modifier.padding(bottom = 8.dp))
                     Spacer(Modifier.height(8.dp))
                     Btn(if (busy) "로그인하는 중" else "로그인", { go() }, Modifier.fillMaxWidth(), style = BtnStyle.Primary, large = true, enabled = ok)
                 }
-                Text("아이디가 없으면 원장님이나 운영자에게 받아 주세요.", style = text(13, color = C.grey500))
+                Text("아이디는 원장님이나 운영자에게 받아요.", style = text(13, color = C.grey500))
                 Btn("처음이세요? 사용 설명서 보기", {
                     try {
                         ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(helpUrl(server))))
@@ -219,7 +218,7 @@ fun CloudChoiceDialog() {
         Column(Modifier.widthIn(max = 440.dp).clip(RoundedCornerShape(24.dp)).background(Color.White).padding(24.dp)) {
             Text("클라우드 시간표와 이 기기 시간표가 달라요", style = text(19, FontWeight.Bold))
             Spacer(Modifier.height(10.dp))
-            Text("어느 쪽으로 맞출까요?", style = text(15, color = C.grey700))
+            Text(" ", style = text(15, color = C.grey700))
             Spacer(Modifier.height(14.dp))
             val by = listOf(c.cloudBy, CloudModel.parseInstant(c.cloudAt)?.atZone(ZoneId.systemDefault())
                 ?.format(DateTimeFormatter.ofPattern("M월 d일 HH:mm")) ?: "").filter { it.isNotBlank() }.joinToString(" · ")
@@ -229,10 +228,10 @@ fun CloudChoiceDialog() {
             Spacer(Modifier.height(20.dp))
             Btn("클라우드 시간표 쓰기", { busy = true; Cloud.chooseCloud() }, Modifier.fillMaxWidth(), style = BtnStyle.Primary,
                 large = true, enabled = !busy)
-            Text("이 기기 시간표는 백업 파일로 남겨 둬요", style = text(12, color = C.grey500),
+            Text("이 기기 시간표는 백업해요.", style = text(12, color = C.grey500),
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
             Btn("이 기기 시간표로 바꾸기", { busy = true; Cloud.chooseLocal() }, Modifier.fillMaxWidth(), large = true, enabled = !busy)
-            Text("클라우드와 연결된 다른 기기의 시간표도 이 기기 것으로 바뀌어요", style = text(12, color = C.grey500),
+            Text("연결된 모든 기기 시간표가 바뀌어요.", style = text(12, color = C.grey500),
                 modifier = Modifier.padding(top = 4.dp))
         }
     }

@@ -44,7 +44,7 @@ class LogsPage(QWidget):
         root.setContentsMargins(28, 26, 28, 20)
         root.setSpacing(16)
 
-        header = PageHeader("기록", "종이 언제 울렸는지, 건너뛰었는지 볼 수 있어요. 같은 아이디로 연결한 다른 기기 기록도 함께 보여요.")
+        header = PageHeader("기록", "같은 아이디의 다른 기기 기록도 보여요.")
         self.limit = page_field(QSpinBox())
         self.limit.setRange(50, 5000)
         self.limit.setSingleStep(50)
@@ -192,6 +192,6 @@ class LogsPage(QWidget):
             export_logs_csv(self._rows, path)
         except Exception as e:
             notify(self, "내보내지 못했어요", error_message(
-                "기록을 저장하지 못했어요. 파일이 엑셀에서 열려 있으면 닫고 다시 해 주세요.", e))
+                "엑셀에서 파일을 닫고 다시 저장해요.", e))
             return
         self.ctx.toast(f"{len(self._rows)}건을 저장했어요", "success")

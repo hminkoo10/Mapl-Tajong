@@ -106,7 +106,7 @@ fun SearchScreen(onClose: () -> Unit, onEdit: (EditTarget) -> Unit) {
     var source by remember { mutableStateOf(repo.setting("search_source", Online.YOUTUBE).let { if (it in Online.SOURCES) it else Online.YOUTUBE }) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Found>>(emptyList()) }
-    var emptyText by remember { mutableStateOf("무엇을 찾을까요?" to "위의 추천 검색어를 눌러도 돼요.") }
+    var emptyText by remember { mutableStateOf("검색어를 입력해요." to " ") }
     var searching by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Found?>(null) }
     var state by remember { mutableStateOf("") }
@@ -161,7 +161,7 @@ fun SearchScreen(onClose: () -> Unit, onEdit: (EditTarget) -> Unit) {
             try {
                 val r = withContext(Dispatchers.IO) { Online.search(q, source) }
                 results = r
-                if (r.isEmpty()) emptyText = "찾는 결과가 없어요" to "다른 검색어로 찾아 보세요."
+                if (r.isEmpty()) emptyText = "찾는 결과가 없어요" to "다른 검색어로 찾아요."
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -251,7 +251,7 @@ fun SearchScreen(onClose: () -> Unit, onEdit: (EditTarget) -> Unit) {
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("종소리 찾기", style = text(24, FontWeight.Bold))
-                        Text("YouTube나 SoundCloud에서 소리만 받아 종소리로 만들어요.", style = text(13, color = C.grey600))
+                        Text("", style = text(13, color = C.grey600))
                     }
                     if (source == Online.YOUTUBE) {
                         Spacer(Modifier.width(8.dp))
@@ -323,7 +323,7 @@ fun SearchScreen(onClose: () -> Unit, onEdit: (EditTarget) -> Unit) {
                 Btn("바로 추가", { download(false) }, Modifier.weight(1f), enabled = canAct, large = true)
                 Btn("받아서 다듬기", { download(true) }, Modifier.weight(1.3f), style = BtnStyle.Primary, enabled = canAct, large = true)
             }
-            Text("저작권이 있는 소리는 허락된 범위에서만 써 주세요. 받은 소리는 이 기기에만 저장돼요.",
+            Text("사용이 허락된 소리만 받아요.",
                 style = text(12, color = C.grey400))
         }
     }

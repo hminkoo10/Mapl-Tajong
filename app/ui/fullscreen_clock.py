@@ -115,7 +115,7 @@ class _WeatherNow(QWidget):
         self.data = None
         self.failed = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("눌러서 날씨 지역 바꾸기")
+        self.setToolTip("날씨 지역 바꾸기")
         self.th = THEMES["dark"]
         self.px = 40
 
@@ -143,7 +143,7 @@ class _WeatherNow(QWidget):
                 p.setPen(qc(*self.th["dim"]))
                 p.setFont(font(self.px * 0.5, QFont.Weight.Medium))
                 p.drawText(QRectF(self.rect()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
-                           "날씨를 불러오지 못했어요 · 눌러서 지역 확인")
+                           "눌러서 날씨 지역을 확인해요.")
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -288,7 +288,7 @@ class FullscreenClock(TickingWidget):
         top.addWidget(self.wx_now, 0, Qt.AlignmentFlag.AlignVCenter)
         top.addSpacing(8)
         self.btn_theme = Button("", icon_name="sun")
-        self.btn_theme.setToolTip("밝은 화면 / 어두운 화면 (T)")
+        self.btn_theme.setToolTip("화면 색 바꾸기 (T)")
         self.btn_theme.clicked.connect(self.toggle_theme)
         top.addWidget(self.btn_theme, 0, Qt.AlignmentFlag.AlignVCenter)
         self.btn_close = Button("닫기")

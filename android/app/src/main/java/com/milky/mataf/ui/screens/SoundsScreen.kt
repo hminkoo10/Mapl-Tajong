@@ -88,7 +88,7 @@ fun SoundsScreen(onSearch: () -> Unit, onEdit: (Sound) -> Unit) {
     }
 
     Page(14.dp) {
-        PageHeader("종소리", "파일을 넣거나 YouTube·SoundCloud에서 찾아 받고, 필요한 부분만 잘라 쓸 수 있어요.")
+        PageHeader("종소리", " ")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Btn("찾아서 받기", onSearch, style = BtnStyle.Primary, icon = Icons.Rounded.Search)
             Btn("파일 추가", { SoundPicker.open(ctx) }, enabled = picker.idle, style = BtnStyle.White, icon = Icons.Rounded.Add)
@@ -110,12 +110,12 @@ fun SoundsScreen(onSearch: () -> Unit, onEdit: (Sound) -> Unit) {
                     onEdit = { onEdit(s) }, onInfo = { info = s },
                     onDelete = {
                         val n = usage[s.id] ?: 0
-                        if (n > 0) Toasts.show("일정 ${n}개에서 쓰고 있어요. 시간표에서 다른 종소리로 바꾼 뒤 지워 주세요.", "warning")
+                        if (n > 0) Toasts.show("시간표에서 다른 종소리로 바꾼 뒤 지워요. (사용 중: ${n}개)", "warning")
                         else confirm = s
                     })
             }
         }
-        Text("${sounds.size}개 · 눌러서 들어볼 수 있어요", style = text(13, color = C.grey500), modifier = Modifier.padding(start = 4.dp))
+        Text("${sounds.size}개", style = text(13, color = C.grey500), modifier = Modifier.padding(start = 4.dp))
     }
 
     picker.uri?.takeUnless { picker.importing }?.let { selected ->

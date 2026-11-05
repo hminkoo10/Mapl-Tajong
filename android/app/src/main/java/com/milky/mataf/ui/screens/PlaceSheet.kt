@@ -83,22 +83,22 @@ fun PlaceSheet(onPicked: (String) -> Unit, onDismiss: () -> Unit) {
                 results = found
                 val first = found.firstOrNull()
                 state = when {
-                    first == null -> "찾는 곳이 없어요. 동네(○○동)나 시·구 이름, 또는 도로명 주소로 찾아 보세요."
-                    first.exact -> "주소를 건물까지 찾았어요. 눌러서 고르세요."
-                    else -> (if (first.approx != null) "건물 번호까지는 못 찾아서 ‘${first.approx}’ 근처로 찾았어요. " else "") +
-                        "${found.size}곳을 찾았어요. 눌러서 고르세요."
+                    first == null -> "동네나 도로명 주소로 다시 찾아요."
+                    first.exact -> "건물 주소를 찾았어요."
+                    else -> (if (first.approx != null) "‘${first.approx}’ 근처예요. " else "") +
+                        "${found.size}곳을 찾았어요."
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (my == seq) state = "지금은 찾을 수 없어요. 인터넷 연결을 확인하거나 아래 도시에서 골라 주세요."
+                if (my == seq) state = "인터넷 연결을 확인하거나 아래 도시에서 골라요."
             } finally {
                 if (my == seq) searching = false
             }
         }
     }
 
-    AppSheet("날씨 지역 고르기", onDismiss, subtitle = "동네·주소로 찾거나, 아래 도시에서 골라 주세요.",
+    AppSheet("날씨 지역 고르기", onDismiss, subtitle = " ",
         footer = { Btn("닫기", onDismiss, Modifier.fillMaxWidth(), large = true) }) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("지금 지역: $current", style = text(14, color = C.grey600))

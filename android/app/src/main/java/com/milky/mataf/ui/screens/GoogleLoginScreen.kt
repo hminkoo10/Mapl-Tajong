@@ -79,9 +79,9 @@ fun GoogleLoginScreen(onDone: (Boolean) -> Unit) {
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text("구글 로그인", style = text(20, FontWeight.Bold))
-                    Text("YouTube에서 종소리를 받을 때 쓸 구글 계정으로 로그인해요. 자주 쓰지 않는 계정이어도 괜찮아요.",
+                    Text("YouTube에서 소리를 받을 때 써요.",
                         style = text(13, color = C.grey600))
-                    Text("로그인 정보는 이 기기에만 저장하고 다른 곳으로 보내지 않아요.", style = text(12, color = C.grey400))
+                    Text("로그인 정보는 이 기기에만 저장해요.", style = text(12, color = C.grey400))
                 }
             }
             if (progress in 1..99) {

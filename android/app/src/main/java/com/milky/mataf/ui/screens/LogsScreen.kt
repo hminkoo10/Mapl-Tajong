@@ -79,7 +79,7 @@ fun LogsScreen() {
     }
 
     Page(14.dp) {
-        PageHeader("기록", "종이 언제 울렸는지 볼 수 있어요.")
+        PageHeader("기록", " ")
         Segmented(listOf("오늘", "7일", "30일"), range, { range = it }, Modifier.fillMaxWidth(), onPage = true)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Select(listOf<Pair<String?, String>>(null to "모든 결과") + RESULT_LABELS.map { it.key to it.value }, result,

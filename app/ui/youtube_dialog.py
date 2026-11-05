@@ -209,7 +209,7 @@ class YoutubeDialog(BaseDialog):
     enter_accepts = False
 
     def __init__(self, ctx, parent=None):
-        super().__init__("종소리 찾기", "YouTube나 SoundCloud에서 소리만 받아 종소리로 만들어요.", None, parent, 760)
+        super().__init__("종소리 찾기", " ", None, parent, 760)
         self.ctx = ctx
         self.result_id = None
         self.cards = []
@@ -297,12 +297,12 @@ class YoutubeDialog(BaseDialog):
         sl.addWidget(self.btn_cancel_dl)
         self.body.addWidget(self.state)
 
-        note = QLabel("저작권이 있는 소리는 허락된 범위에서만 써 주세요. 받은 소리는 이 컴퓨터에만 저장돼요.")
+        note = QLabel("사용이 허락된 소리만 받아요.")
         note.setStyleSheet(f"color: {C.grey400}; font-size: 12.5px;")
         self.body.addWidget(note)
 
         self.btn_open = Button("미리 듣기", icon_name="play", variant="secondary", size="lg")
-        self.btn_open.setToolTip(f"받기 전에 앞부분 {PREVIEW_SEC}초를 들어볼 수 있어요")
+        self.btn_open.setToolTip(f"앞부분 {PREVIEW_SEC}초를 들어요.")
         self.btn_open.clicked.connect(lambda: self.toggle_preview(self.selected))
         self.footer_left.addWidget(self.btn_open)
         self.btn_direct = Button("바로 추가", variant="secondary", size="lg")
@@ -312,13 +312,13 @@ class YoutubeDialog(BaseDialog):
         self.btn_cancel.setText("닫기")
         self._set_actions_enabled(False)
 
-        self._empty("무엇을 찾을까요?\n위의 추천 검색어를 눌러도 돼요.")
+        self._empty("검색어를 입력해요.")
         self._sync_login()
         if not youtube.available():
-            self._set_state("yt-dlp가 설치되어 있지 않아 찾기 기능을 쓸 수 없어요.", error=True)
+            self._set_state("통합 클라우드에서 업데이트해요.", error=True)
             self.btn_search.setEnabled(False)
         elif not ffmpeg.available():
-            self._set_state("ffmpeg를 찾을 수 없어 소리를 변환할 수 없어요.", error=True)
+            self._set_state("통합 클라우드에서 업데이트해요.", error=True)
         self.resize(820, 720)
         QTimer.singleShot(0, self.query.setFocus)
 
@@ -346,7 +346,7 @@ class YoutubeDialog(BaseDialog):
         self._fill_chips()
         self._sync_login()
         self.btn_search.setEnabled(self._dl is None)
-        self._empty("무엇을 찾을까요?\n위의 추천 검색어를 눌러도 돼요.")
+        self._empty("검색어를 입력해요.")
         self._set_state("")
         if self.query.text().strip() and not youtube.looks_like_url(self.query.text()):
             self.search()
@@ -445,7 +445,7 @@ class YoutubeDialog(BaseDialog):
             self.btn_search.setEnabled(True)
             self._empty("결과를 가져오지 못했어요")
             self._set_state(msg, error=True, error_summary=
-                            "검색 결과를 가져오지 못했어요. 인터넷 연결을 확인하고 다시 찾아 주세요.")
+                            "인터넷 연결을 확인한 뒤 다시 찾아요.")
         except RuntimeError:
             pass
 
@@ -457,7 +457,7 @@ class YoutubeDialog(BaseDialog):
             return
         self.btn_search.setEnabled(True)
         if not results:
-            self._empty("찾는 영상이 없어요\n다른 말로 검색해 보세요")
+            self._empty("다른 검색어로 찾아요.")
             self._set_state("")
             return
         self._clear()
@@ -540,7 +540,7 @@ class YoutubeDialog(BaseDialog):
             self._pv_card = None
             self._sync_preview_button()
             self._set_state(msg, error=True, retry=lambda c=card: self.toggle_preview(c) if c in self.cards else None,
-                            error_summary="미리 듣기를 재생하지 못했어요. 인터넷과 스피커 연결을 확인하고 다시 해 주세요.")
+                            error_summary="인터넷·스피커 연결을 확인한 뒤 다시 들어요.")
         except RuntimeError:
             pass
 
@@ -609,8 +609,7 @@ class YoutubeDialog(BaseDialog):
             edit = self._dl_edit
             self._dl_reset()
             self._set_state(msg, error=True, retry=lambda: self.download(edit=edit),
-                            error_summary="종소리를 받지 못했어요. 인터넷 연결을 확인하고 다시 해 주세요. "
-                                          "로그인 안내가 나오면 구글 로그인 후 다시 받아 주세요.")
+                            error_summary="인터넷 연결을 확인해요. 로그인 안내가 나오면 구글 로그인해요.")
         except RuntimeError:
             pass
 
@@ -645,7 +644,7 @@ class YoutubeDialog(BaseDialog):
                 self.result_id = sound_files.add_sound_from_file(self.ctx.conn, src, name, 1.0)
         except Exception as e:
             self._set_state(str(e), error=True, error_summary=
-                            "종소리를 추가하지 못했어요. 파일이 다른 프로그램에서 열려 있으면 닫고 다시 해 주세요.")
+                            "다른 프로그램에서 파일을 닫고 다시 추가해요.")
             return
         finally:
             try:

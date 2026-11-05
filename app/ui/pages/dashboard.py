@@ -274,8 +274,7 @@ class DashboardPage(QWidget):
         root.addLayout(head)
 
         # 이 기기에서 종을 울리지 않을 때 늘 보이는 안내
-        self.ring_off = QLabel("이 컴퓨터에서는 종이 울리지 않아요. 시간표만 맞추고, ‘지금 울리기’는 종을 울리는 기기에서 울려요."
-                               "  (설정 → 이 기기에서 종 울리기)")
+        self.ring_off = QLabel("이 컴퓨터는 울리지 않아요. ‘지금 울리기’는 다른 기기에서 울려요.")
         self.ring_off.setWordWrap(True)
         self.ring_off.setStyleSheet(f"background: {C.warning_soft}; color: {C.grey800}; font-size: 14px; "
                                     f"font-weight: 600; border-radius: 12px; padding: 10px 16px;")
@@ -320,8 +319,8 @@ class DashboardPage(QWidget):
         grid.setSpacing(12)
         self.t_ring = ActionTile("ring", "다음 종 지금 울리기", "모든 기기에서 함께 울려요")
         self.t_skip = ActionTile("skip", "다음 종 건너뛰기", "이번 한 번만 울리지 않아요")
-        self.t_pause = ActionTile("pause", "잠시 멈추기", "자동 타종을 멈춰요")
-        self.t_full = ActionTile("fullscreen", "전체화면 시계", "교실 화면에 크게 띄워요")
+        self.t_pause = ActionTile("pause", "잠시 멈추기", "")
+        self.t_full = ActionTile("fullscreen", "전체화면 시계", "")
         grid.addWidget(self.t_ring, 0, 0)
         grid.addWidget(self.t_skip, 0, 1)
         grid.addWidget(self.t_pause, 1, 0)
@@ -518,7 +517,7 @@ class DashboardPage(QWidget):
         else:
             self.ring.set_state(0, "--:--", "")
             self.next_name.setText("예정된 종이 없어요")
-            self.next_when.setText("시간표에서 일정을 추가해 보세요")
+            self.next_when.setText("시간표에서 일정을 추가해요")
 
         ringing = self.sch.ring_enabled
         if ringing != self._ringing:
@@ -542,9 +541,9 @@ class DashboardPage(QWidget):
             self.dot.set_color(C.grey400, pulse=False)
 
         if self.sch.paused:
-            self.t_pause.set_content("play", "다시 시작하기", "멈춘 자동 타종을 이어가요")
+            self.t_pause.set_content("play", "다시 시작하기", "")
         else:
-            self.t_pause.set_content("pause", "잠시 멈추기", "자동 타종을 멈춰요")
+            self.t_pause.set_content("pause", "잠시 멈추기", "")
         self.t_ring.setEnabled(ev is not None)
         self.t_skip.setEnabled(ev is not None)
         self.eq.set_active(self.ctx.player.is_playing())
@@ -641,7 +640,7 @@ class DashboardPage(QWidget):
             self.eq.set_active(True)
         except Exception as e:
             self.ctx.toast(error_message(
-                "종소리를 울리지 못했어요. 스피커 연결과 종소리 파일을 확인하고 다시 해 주세요.", e), "error", 6000)
+                "스피커 연결과 종소리 파일을 확인해요.", e), "error", 6000)
 
     def on_stop(self):
         self.ctx.player.stop()

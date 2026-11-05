@@ -145,8 +145,8 @@ fun HomeScreen() {
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text("이 기기에서는 종을 울리지 않아요", style = text(14, FontWeight.SemiBold))
-                        Text(if (Cloud.isLoggedIn()) "클라우드에 연결된 다른 기기가 울려요. ‘지금 울리기’는 그 기기에 부탁해요."
-                            else "클라우드에 로그인하거나 설정에서 ‘이 기기에서 종 울리기’를 켜 주세요.",
+                        Text(if (Cloud.isLoggedIn()) "‘지금 울리기’는 다른 기기에서 울려요."
+                            else "설정에서 ‘이 기기에서 종 울리기’를 켜요.",
                             style = text(13, color = C.grey600))
                     }
                 }
@@ -158,7 +158,7 @@ fun HomeScreen() {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.Warning, null, tint = C.warning)
                     Spacer(Modifier.width(10.dp))
-                    Text("정확한 시각에 울리려면 ‘알람 및 리마인더’ 권한이 필요해요.", style = text(14, FontWeight.Medium),
+                    Text("정시 타종에는 ‘알람 및 리마인더’ 허용이 필요해요.", style = text(14, FontWeight.Medium),
                         modifier = Modifier.weight(1f))
                     Btn("허용하기", { Alarms.openExactSettings(ctx) }, small = true, style = BtnStyle.Soft)
                 }
@@ -183,7 +183,7 @@ fun HomeScreen() {
                                 Scheduler.undo(ctx, ev.scheduleId, ev.runAt.toLocalDate(), Scheduler.FIRED)
                             } else Toasts.show("$what 종을 울리는 기기에서 울려요", "success")
                         } else if (!Cloud.isLoggedIn()) {
-                            Toasts.show("클라우드에 로그인해야 다른 기기에 울려 달라고 할 수 있어요", "warning")
+                            Toasts.show("다른 기기에서 울리려면 클라우드에 로그인해요.", "warning")
                         }
                     }
                     ActionTile(Icons.Rounded.SkipNext, "다음 종 건너뛰기", "이번 한 번만 울리지 않아요", Modifier.weight(1f),
@@ -196,11 +196,11 @@ fun HomeScreen() {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     ActionTile(if (paused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
                         if (paused) "자동 타종 다시 켜기" else "잠시 멈추기",
-                        if (paused) "잠시 멈춘 동안이라 울리지 않았어요" else "자동 타종을 멈춰요", Modifier.weight(1f)) {
+                        if (paused) "" else "", Modifier.weight(1f)) {
                         Scheduler.setPaused(ctx, !paused)
                         Toasts.show(if (paused) "자동 타종을 다시 켰어요" else "자동 타종을 잠시 멈췄어요")
                     }
-                    ActionTile(Icons.Rounded.Fullscreen, "전체화면 시계", "교실 화면에 크게 띄워요", Modifier.weight(1f)) {
+                    ActionTile(Icons.Rounded.Fullscreen, "전체화면 시계", "", Modifier.weight(1f)) {
                         ctx.startActivity(Intent(ctx, FullscreenActivity::class.java))
                     }
                 }
@@ -257,7 +257,7 @@ private fun NextCard(next: com.milky.mataf.core.NextEvent?, now: LocalDateTime, 
                 Text("다음 종", style = text(14, FontWeight.SemiBold, C.grey600))
                 Spacer(Modifier.height(6.dp))
                 Text(next?.name ?: "예정된 종이 없어요", style = text(24, FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(if (next != null) "${TimeUtil.whenText(next.runAt, now)}  ·  ${next.soundName}" else "시간표에서 일정을 추가해 보세요",
+                Text(if (next != null) "${TimeUtil.whenText(next.runAt, now)}  ·  ${next.soundName}" else "시간표에서 일정을 추가해요",
                     style = text(14, color = C.grey600), modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(18.dp))
                 Text(setName, style = text(13, color = C.grey500))
@@ -329,7 +329,7 @@ private fun ManualPlayCard(ringing: String?, ringsHere: Boolean) {
             Btn("울리기", {
                 chosen?.let { id ->
                     val name = sounds.firstOrNull { it.id == id }?.name ?: "종"
-                    if (Cloud.ringNow(null, id) == null) Toasts.show("클라우드에 로그인해야 다른 기기에 울려 달라고 할 수 있어요", "warning")
+                    if (Cloud.ringNow(null, id) == null) Toasts.show("다른 기기에서 울리려면 클라우드에 로그인해요.", "warning")
                     else Toasts.show(if (ringsHere) "${name}을(를) 3초 뒤 모든 기기에서 함께 울려요" else "${name}을(를) 3초 뒤 종을 울리는 기기에서 울려요",
                         "success")
                 }

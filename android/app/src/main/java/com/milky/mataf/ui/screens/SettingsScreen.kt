@@ -185,12 +185,12 @@ fun SettingsScreen(extra: @Composable () -> Unit = {}) {
         Card {
             Text("정확히 울리게 하기", style = text(17, FontWeight.Bold))
             Spacer(Modifier.height(6.dp))
-            SettingRow("알람 및 리마인더", if (exactOk) "허용됨 · 정해진 시각에 정확히 울려요" else "허용해야 정확한 시각에 울려요") {
+            SettingRow("알람 및 리마인더", if (exactOk) " " else "정시에 울리려면 허용해요.") {
                 if (!exactOk) Btn("허용하기", { Alarms.openExactSettings(ctx); refresh() }, style = BtnStyle.Soft, small = true)
                 else Text("허용됨", style = text(14, FontWeight.SemiBold, C.success))
             }
             Divider()
-            SettingRow("배터리 사용량 최적화 제외", if (batteryOk) "제외됨 · 절전 중에도 울려요" else "제외해야 절전 모드에서도 놓치지 않아요") {
+            SettingRow("배터리 사용량 최적화 제외", if (batteryOk) "절전 중에도 울려요." else "절전 중 타종에 필요한 설정이에요.") {
                 if (!batteryOk) Btn("제외하기", {
                     try {
                         ctx.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")))
@@ -202,7 +202,7 @@ fun SettingsScreen(extra: @Composable () -> Unit = {}) {
                 else Text("제외됨", style = text(14, FontWeight.SemiBold, C.success))
             }
             Divider()
-            SettingRow("알림", if (notifOk) "종이 울리는 동안 알림에 ‘정지’ 버튼이 보여요" else "허용하면 알림에서 바로 멈출 수 있어요") {
+            SettingRow("알림", if (notifOk) "알림에서 울리는 종을 멈춰요." else "알림에서 종을 멈추려면 허용해요.") {
                 if (!notifOk && Build.VERSION.SDK_INT >= 33) Btn("허용하기", { notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
                     style = BtnStyle.Soft, small = true)
                 else Text("허용됨", style = text(14, FontWeight.SemiBold, C.success))
@@ -212,15 +212,15 @@ fun SettingsScreen(extra: @Composable () -> Unit = {}) {
         Card {
             Text("전체화면 시계", style = text(17, FontWeight.Bold))
             Spacer(Modifier.height(6.dp))
-            ToggleRow("날씨 예보 보이기", "지금 날씨와 앞으로 몇 시간의 예보를 함께 보여 줘요", weatherOn, {
+            ToggleRow("날씨 예보 보이기", " ", weatherOn, {
                 weatherOn = it; repo.setSetting("weather_on", if (it) "1" else "0")
             })
             Divider()
-            SettingRow("날씨 지역", "$placeName · 동네 이름으로 찾을 수 있어요") {
+            SettingRow("날씨 지역", "$placeName") {
                 Btn("바꾸기", { picking = true }, small = true, enabled = weatherOn)
             }
             Divider()
-            SettingRow("화면 밝기", "시계 화면에서도 바꿀 수 있어요") {
+            SettingRow("화면 밝기", " ") {
                 Segmented(listOf("어둡게", "밝게"), theme, { theme = it; repo.setSetting("fs_theme", if (it == 1) "light" else "dark") },
                     Modifier.width(150.dp))
             }
@@ -228,17 +228,17 @@ fun SettingsScreen(extra: @Composable () -> Unit = {}) {
         Card {
             Text("백업", style = text(17, FontWeight.Bold))
             Spacer(Modifier.height(6.dp))
-            SettingRow("백업 파일 만들기", "시간표, 세트, 종소리를 파일 하나에 담아요") {
+            SettingRow("백업 파일 만들기", "시간표·세트·종소리를 함께 저장해요.") {
                 Btn("백업하기", { backupLauncher.launch(Backup.defaultBackupName()) }, small = true)
             }
             Divider()
-            SettingRow("백업 불러오기", "컴퓨터나 다른 기기에서 만든 백업도 그대로 옮길 수 있어요") {
+            SettingRow("백업 불러오기", " ") {
                 Btn("불러오기", {
                     restoreLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
                 }, small = true)
             }
             Divider()
-            SettingRow("시간표를 엑셀로", "인쇄하거나 공유할 때 써요") {
+            SettingRow("시간표를 엑셀로", " ") {
                 Btn("내보내기", { csvLauncher.launch("시간표_${LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))}.csv") },
                     small = true)
             }
@@ -256,10 +256,10 @@ fun SettingsScreen(extra: @Composable () -> Unit = {}) {
                     trackColor = C.grey100)
             }
             Divider()
-            ToggleRow("자동으로 업데이트", "새 버전이 나오면 받아 두었다가, 다음 종까지 ${Updates.SAFE_GAP_MIN}분 넘게 남았을 때 설치해요",
+            ToggleRow("자동으로 업데이트", "다음 종까지 ${Updates.SAFE_GAP_MIN}분 넘게 남으면 설치해요.",
                 autoUpdate, { autoUpdate = it; Updates.setAuto(ctx, it) })
             Divider()
-            SettingRow("업데이트 기록", "버전마다 무엇이 바뀌었는지 볼 수 있어요") {
+            SettingRow("업데이트 기록", " ") {
                 Btn("보기", { history = true }, small = true)
             }
             val notes = upd.info?.notes.orEmpty()
@@ -287,8 +287,8 @@ fun SettingsScreen(extra: @Composable () -> Unit = {}) {
             val at = googleAt
             SettingRow("YouTube 구글 로그인",
                 if (at != null) "로그인됨 · ${java.time.Instant.ofEpochMilli(at).atZone(java.time.ZoneId.systemDefault())
-                    .format(DateTimeFormatter.ofPattern("yyyy년 MM월 dd일"))}. YouTube에서 받을 때 이 계정을 써요."
-                else "YouTube가 막을 때 로그인하면 받을 수 있어요. 자주 쓰지 않는 계정이어도 돼요.") {
+                    .format(DateTimeFormatter.ofPattern("yyyy년 MM월 dd일"))}"
+                else "YouTube에서 로그인을 요구할 때 써요.") {
                 Btn(if (at != null) "로그아웃" else "로그인", { if (at != null) askLogout = true else loggingIn = true }, small = true)
             }
             Divider()

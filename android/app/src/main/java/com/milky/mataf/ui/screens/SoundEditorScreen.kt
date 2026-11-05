@@ -140,7 +140,7 @@ fun SoundEditorScreen(target: EditTarget, onClose: () -> Unit) {
                 val (s, _) = AudioEdit.suggestTrim(w, 0.0, min(w.duration, 120.0))
                 a = s; b = min(w.duration, s + 10.0); fadeOut = 1.0
                 v0 = max(0.0, s - 5.0); v1 = min(w.duration, b + 20.0)
-                notice = "긴 음원이라 소리가 시작되는 앞부분 10초를 먼저 골라 두었어요. 양 끝을 끌어 바꿀 수 있어요."
+                notice = "소리가 시작되는 앞부분 10초를 골랐어요."
             }
         } catch (e: CancellationException) {
             throw e
@@ -195,7 +195,7 @@ fun SoundEditorScreen(target: EditTarget, onClose: () -> Unit) {
         val n = name.trim()
         when {
             wave == null -> return
-            n.isEmpty() -> { Toasts.show("이름을 입력해 주세요", "warning"); return }
+            n.isEmpty() -> { Toasts.show("이름을 입력해요", "warning"); return }
             b - a < 0.1 -> { Toasts.show("구간이 너무 짧아요", "warning"); return }
         }
         Preview.stop()
@@ -260,7 +260,7 @@ fun SoundEditorScreen(target: EditTarget, onClose: () -> Unit) {
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("종소리 다듬기", style = text(24, FontWeight.Bold))
-                        Text("필요한 부분만 남기고, 시작과 끝을 부드럽게 만들어요.", style = text(13, color = C.grey600))
+                        Text("", style = text(13, color = C.grey600))
                     }
                 }
                 Card(padding = 16.dp) {
@@ -287,7 +287,7 @@ fun SoundEditorScreen(target: EditTarget, onClose: () -> Unit) {
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    Text("끌어서 구간을 고르고, 양 끝을 잡아 조절해요. 길게 누르면 그 자리부터 들려줘요.", style = text(12, color = C.grey400))
+                    Text("양 끝을 끌어 남길 구간을 정해요.", style = text(12, color = C.grey400))
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Btn("확대", { zoom(0.6) }, small = true, style = BtnStyle.Subtle)
@@ -330,7 +330,7 @@ fun SoundEditorScreen(target: EditTarget, onClose: () -> Unit) {
                         Text("%+.1f dB".format(gainDb), style = text(14, FontWeight.SemiBold, C.grey800),
                             modifier = Modifier.widthIn(min = 64.dp).padding(start = 8.dp))
                     }
-                    ToggleRow("크기 자동 맞춤", "다른 종소리와 비슷한 크기가 되도록 음량을 맞춰요", normalize, { normalize = it })
+                    ToggleRow("크기 자동 맞춤", "다른 종소리와 음량을 맞춰요.", normalize, { normalize = it })
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Btn("앞뒤 조용한 부분 자르기", {
                             wave?.let { w ->
@@ -368,7 +368,7 @@ fun SoundEditorScreen(target: EditTarget, onClose: () -> Unit) {
         }
     }
 
-    if (askOverwrite) ConfirmDialog("원래 파일에 덮어쓸까요?", "원본은 따로 보관해 두니까 나중에 되돌릴 수 있어요.", "덮어쓰기",
+    if (askOverwrite) ConfirmDialog("원래 파일에 덮어쓸까요?", "원본을 보관해 되돌릴 수 있어요.", "덮어쓰기",
         { save() }, { askOverwrite = false }, danger = false)
     if (askRestore) ConfirmDialog("원본으로 되돌릴까요?", "다듬기 전의 소리로 돌아가요.", "되돌리기",
         { restore() }, { askRestore = false }, danger = false)

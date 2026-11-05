@@ -18,7 +18,7 @@ class _Bridge(QObject):
 
 class GoogleLoginDialog(BaseDialog):
     def __init__(self, parent=None):
-        super().__init__("구글 로그인", "YouTube에서 종소리를 받을 때 쓸 구글 계정으로 로그인해요.", None, parent, 460)
+        super().__init__("구글 로그인", "YouTube에서 소리를 받을 때 써요.", None, parent, 460)
         self._cancel = threading.Event()
         self._finished = threading.Event()
         self._done = False
@@ -37,11 +37,11 @@ class GoogleLoginDialog(BaseDialog):
 
         notes = QVBoxLayout()
         notes.setSpacing(6)
-        for t in ("로그인을 마치면 브라우저 창을 닫거나 아래 ‘로그인을 마쳤어요’를 눌러 주세요.",
-                  "평소 쓰는 브라우저와는 따로 열리는 창이에요.",
-                  "자주 쓰지 않는 구글 계정을 써도 괜찮아요.",
-                  "로그인 정보는 이 컴퓨터에만 저장하고 다른 곳으로 보내지 않아요."):
-            lab = QLabel("· " + t)
+        for t in ("",
+                  "",
+                  "",
+                  "로그인 정보는 이 컴퓨터에만 저장해요."):
+            lab = QLabel("· " + t if t else "")
             lab.setWordWrap(True)
             lab.setStyleSheet(f"font-size: 13.5px; color: {C.grey600};")
             notes.addWidget(lab)
@@ -57,9 +57,9 @@ class GoogleLoginDialog(BaseDialog):
         if not found:
             self.spinner.hide()
             self.status.setText("Chrome이나 Edge를 찾지 못했어요")
-            self.show_error("둘 중 하나를 설치한 뒤 다시 해 주세요.")
+            self.show_error("Chrome이나 Edge를 설치해요.")
             return
-        self.status.setText(f"{found[0]} 창에서 구글 계정으로 로그인해 주세요")
+        self.status.setText(f"{found[0]} 창에서 구글 로그인해요")
         self.btn_ok.setEnabled(True)
         run_async(google_login.run_login, self._cancel, self._bridge.text.emit, 900, found, self._finished,
                   on_done=self._ok, on_fail=self._fail)
@@ -96,7 +96,7 @@ class GoogleLoginDialog(BaseDialog):
             self.spinner.hide()
             self.status.setText("로그인하지 못했어요")
             self.show_error(error_message(
-                "구글 로그인하지 못했어요. 인터넷 연결을 확인하고 로그인 창을 다시 열어 주세요.", msg))
+                "인터넷 연결을 확인한 뒤 로그인 창을 다시 열어요.", msg))
             self.btn_ok.hide()
             self.btn_cancel.setText("닫기")
         except RuntimeError:

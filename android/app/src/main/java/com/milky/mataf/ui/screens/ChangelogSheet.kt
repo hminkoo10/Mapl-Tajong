@@ -70,7 +70,7 @@ fun ChangelogSheet(onDismiss: () -> Unit, onlyVersion: String? = null, title: St
     val entries = remember {
         Changelog.load(ctx).let { all -> if (onlyVersion == null) all else all.filter { it.version == onlyVersion }.ifEmpty { all.take(1) } }
     }
-    AppSheet(title ?: "업데이트 기록", onDismiss, subtitle = if (onlyVersion == null) "버전마다 무엇이 바뀌었는지 볼 수 있어요." else "",
+    AppSheet(title ?: "업데이트 기록", onDismiss, subtitle = if (onlyVersion == null) " " else "",
         footer = { Btn("확인", onDismiss, Modifier.fillMaxWidth(), style = BtnStyle.Primary, large = true) }) {
         if (entries.isEmpty()) Empty("기록을 찾지 못했어요.")
         entries.forEachIndexed { i, e ->
