@@ -85,7 +85,7 @@ def _without_cloud():
     if launched:
         text = cloud.REASON
     else:
-        text = ("통합 클라우드에 로그인한 뒤 ‘마고 타종’을 열어요.")
+        text = ("통합 클라우드에 로그인한 뒤 ‘마고 타종’을 여세요.")
     box = QMessageBox(QMessageBox.Icon.Information, "마고에듀 통합 클라우드", text)
     get = box.addButton("통합 클라우드 받기", QMessageBox.ButtonRole.AcceptRole)
     box.addButton("닫기", QMessageBox.ButtonRole.RejectRole)
@@ -121,7 +121,8 @@ def main():
 
     ok = acquire(APP_NAME, app_data_dir())
     if not ok:
-        QMessageBox.information(None, "알림", "작업 표시줄 오른쪽의 마고 타종 아이콘을 눌러요.")
+        QMessageBox.information(None, "알림", "이미 프로그램이 켜져 있어요.\n"
+                                "작업 표시줄 오른쪽 트레이에서 마고 타종 아이콘을 눌러 창을 여세요.")
         return
 
     load_fonts(asset_path("fonts"))
@@ -141,7 +142,8 @@ def main():
     if legacy_app_running():
         from app.ui.dialogs import notify
         notify(None, "예전 마고 타종이 켜져 있어요",
-               "예전 마고 타종을 종료해요. 두 프로그램이 켜져 있으면 종이 두 번 울려요.")
+               "따로 설치한 마고 타종이 켜져 있어요. 그대로 두면 종이 두 번 울려요.\n"
+               "작업 표시줄 오른쪽 트레이에서 그 아이콘을 오른쪽 클릭하고 ‘종료’를 누르세요.")
 
     conn, prefer_local = cloud_sync.open_database(read_schema(), ask_choice=_ask_first_sync)
 

@@ -146,7 +146,7 @@ fun HomeScreen() {
                     Column(Modifier.weight(1f)) {
                         Text("이 기기에서는 종을 울리지 않아요", style = text(14, FontWeight.SemiBold))
                         Text(if (Cloud.isLoggedIn()) "‘지금 울리기’는 다른 기기에서 울려요."
-                            else "설정에서 ‘이 기기에서 종 울리기’를 켜요.",
+                            else "설정에서 ‘이 기기에서 종 울리기’를 켜세요.",
                             style = text(13, color = C.grey600))
                     }
                 }
@@ -183,7 +183,7 @@ fun HomeScreen() {
                                 Scheduler.undo(ctx, ev.scheduleId, ev.runAt.toLocalDate(), Scheduler.FIRED)
                             } else Toasts.show("$what 종을 울리는 기기에서 울려요", "success")
                         } else if (!Cloud.isLoggedIn()) {
-                            Toasts.show("다른 기기에서 울리려면 클라우드에 로그인해요.", "warning")
+                            Toasts.show("다른 기기에서 울리려면 클라우드에 로그인하세요.", "warning")
                         }
                     }
                     ActionTile(Icons.Rounded.SkipNext, "다음 종 건너뛰기", "이번 한 번만 울리지 않아요", Modifier.weight(1f),
@@ -257,7 +257,7 @@ private fun NextCard(next: com.milky.mataf.core.NextEvent?, now: LocalDateTime, 
                 Text("다음 종", style = text(14, FontWeight.SemiBold, C.grey600))
                 Spacer(Modifier.height(6.dp))
                 Text(next?.name ?: "예정된 종이 없어요", style = text(24, FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(if (next != null) "${TimeUtil.whenText(next.runAt, now)}  ·  ${next.soundName}" else "시간표에서 일정을 추가해요",
+                Text(if (next != null) "${TimeUtil.whenText(next.runAt, now)}  ·  ${next.soundName}" else "시간표에서 일정을 추가하세요",
                     style = text(14, color = C.grey600), modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(18.dp))
                 Text(setName, style = text(13, color = C.grey500))
@@ -329,7 +329,7 @@ private fun ManualPlayCard(ringing: String?, ringsHere: Boolean) {
             Btn("울리기", {
                 chosen?.let { id ->
                     val name = sounds.firstOrNull { it.id == id }?.name ?: "종"
-                    if (Cloud.ringNow(null, id) == null) Toasts.show("다른 기기에서 울리려면 클라우드에 로그인해요.", "warning")
+                    if (Cloud.ringNow(null, id) == null) Toasts.show("다른 기기에서 울리려면 클라우드에 로그인하세요.", "warning")
                     else Toasts.show(if (ringsHere) "${name}을(를) 3초 뒤 모든 기기에서 함께 울려요" else "${name}을(를) 3초 뒤 종을 울리는 기기에서 울려요",
                         "success")
                 }

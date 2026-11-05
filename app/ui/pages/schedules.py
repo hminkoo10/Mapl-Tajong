@@ -276,7 +276,7 @@ class SchedulesPage(QWidget):
     def on_add(self):
         sounds = repo.list_sounds(self.conn)
         if not sounds:
-            notify(self, "종소리가 없어요", "종소리를 추가해요.")
+            notify(self, "종소리가 없어요", "종소리를 추가하세요.")
             return
         dlg = ScheduleDialog(self.ctx, sounds, None, self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -405,7 +405,7 @@ class SchedulesPage(QWidget):
         try:
             sid = repo.insert_schedule_set(self.conn, name)
         except Exception:
-            notify(self, "이미 있는 이름이에요", "다른 이름을 입력해요.")
+            notify(self, "이미 있는 이름이에요", "다른 이름을 입력하세요.")
             return
         repo.set_active_set(self.conn, sid)
         self.ctx.changed("sets")
@@ -420,7 +420,7 @@ class SchedulesPage(QWidget):
         try:
             sid = repo.duplicate_schedule_set(self.conn, cur_id, name)
         except Exception:
-            notify(self, "이미 있는 이름이에요", "다른 이름을 입력해요.")
+            notify(self, "이미 있는 이름이에요", "다른 이름을 입력하세요.")
             return
         repo.set_active_set(self.conn, sid)
         self.ctx.changed("sets")
@@ -434,7 +434,7 @@ class SchedulesPage(QWidget):
         try:
             repo.rename_schedule_set(self.conn, sid, name)
         except Exception:
-            notify(self, "이미 있는 이름이에요", "다른 이름을 입력해요.")
+            notify(self, "이미 있는 이름이에요", "다른 이름을 입력하세요.")
             return
         self.ctx.changed("sets")
 

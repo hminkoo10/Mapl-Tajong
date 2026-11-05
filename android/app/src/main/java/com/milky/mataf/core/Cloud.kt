@@ -123,7 +123,7 @@ object Cloud {
         _status.value = Status(
             loggedIn = token != null, server = server, username = repo.setting(K_USERNAME, ""), name = repo.setting(K_NAME, ""),
             lastSync = repo.setting(K_LAST_SYNC, "").toLongOrNull() ?: 0,
-            message = if (token == null && saved.isNotEmpty()) "로그인 정보를 읽지 못했어요. 다시 로그인해 주세요." else "",
+            message = if (token == null && saved.isNotEmpty()) "로그인 정보를 읽지 못했어요. 다시 로그인하세요." else "",
         )
         DataChanges.listener = { onDataChanged(it) }
         scope.launch { loop() }
@@ -920,19 +920,19 @@ object Cloud {
     /** 로그인. 실패하면 사용자에게 보여 줄 문구, 성공하면 null */
     suspend fun login(serverInput: String, username: String, password: String, ringHere: Boolean): String? = withContext(Dispatchers.IO) {
         val srv = CloudModel.normalizeServer(serverInput)
-        if (srv.isEmpty()) return@withContext "서버 주소를 입력해 주세요."
+        if (srv.isEmpty()) return@withContext "서버 주소를 입력하세요."
         val device = linkedMapOf("id" to deviceId(), "name" to deviceName(), "platform" to "android", "version" to BuildConfig.VERSION_NAME)
         val res = try {
             CloudApi(srv, null).login(username.trim(), password, device)
         } catch (e: CloudError) {
-            return@withContext if (e.status == 404) "이 주소에서 통합 클라우드 서버를 찾지 못했어요. 주소를 확인해 주세요." else e.message
+            return@withContext if (e.status == 404) "이 주소에서 통합 클라우드 서버를 찾지 못했어요. 주소를 확인하세요." else e.message
         }
         val tok = res["token"].jStr() ?: return@withContext "서버 응답을 읽지 못했어요."
         val user = res["user"].jObj() ?: emptyMap()
         val allowed = user["allowedApps"]
         if (allowed is List<*> && allowed.none { it == CloudModel.APP_ID }) {
             runCatching { CloudApi(srv, tok).logout() }
-            return@withContext "이 계정은 마고 타종을 쓸 수 없어요. 원장님이나 운영자에게 문의해 주세요."
+            return@withContext "이 계정은 마고 타종을 쓸 수 없어요. 원장님이나 운영자에게 문의하세요."
         }
         val uname = user["username"].jStr() ?: username.trim().lowercase()
         val name = user["name"].jStr() ?: ""
@@ -990,10 +990,10 @@ object Cloud {
         _choice.value = null
         pendingRemote = null
         _status.value = _status.value.copy(loggedIn = false, conn = Conn.OFF, syncing = false,
-            message = message.ifBlank { "로그인이 끝났어요. 다시 로그인해 주세요." })
+            message = message.ifBlank { "로그인이 끝났어요. 다시 로그인하세요." })
         accountChanged()
-        CloudService.notifyLogin(app, if (rang) "로그인이 끝나서 이 기기에서 종을 울리지 않아요. 다시 로그인해 주세요."
-            else "클라우드 로그인이 끝났어요. 다시 로그인해 주세요.")
+        CloudService.notifyLogin(app, if (rang) "로그인이 끝나서 이 기기에서 종을 울리지 않아요. 다시 로그인하세요."
+            else "클라우드 로그인이 끝났어요. 다시 로그인하세요.")
     }
 
     private fun accountChanged() {

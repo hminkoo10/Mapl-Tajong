@@ -83,15 +83,15 @@ fun PlaceSheet(onPicked: (String) -> Unit, onDismiss: () -> Unit) {
                 results = found
                 val first = found.firstOrNull()
                 state = when {
-                    first == null -> "동네나 도로명 주소로 다시 찾아요."
-                    first.exact -> "건물 주소를 찾았어요."
+                    first == null -> "동네나 도로명 주소로 다시 찾아 보세요."
+                    first.exact -> "건물 주소를 찾았어요. 눌러서 고르세요."
                     else -> (if (first.approx != null) "‘${first.approx}’ 근처예요. " else "") +
-                        "${found.size}곳을 찾았어요."
+                        "${found.size}곳을 찾았어요. 눌러서 고르세요."
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (my == seq) state = "인터넷 연결을 확인하거나 아래 도시에서 골라요."
+                if (my == seq) state = "인터넷 연결을 확인하거나 아래 도시에서 골라 보세요."
             } finally {
                 if (my == seq) searching = false
             }

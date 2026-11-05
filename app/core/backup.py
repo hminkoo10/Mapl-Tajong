@@ -309,7 +309,7 @@ def read_manifest(src):
     if fmt is None or fmt < 1:
         raise BackupError("마고 타종에서 만든 백업 파일이 아니에요.")
     if fmt > FORMAT:
-        raise BackupError("더 최신 버전에서 만든 백업이에요. 프로그램을 업데이트해 주세요.")
+        raise BackupError("더 최신 버전에서 만든 백업이에요. 프로그램을 업데이트하세요.")
     counts = m.get("counts")
     m["counts"] = {t: n if n is not None and 0 <= n <= MAX_ROWS[t] else 0
                    for t in _TABLES for n in [_clean_int(counts.get(t)) if isinstance(counts, dict) else None]}

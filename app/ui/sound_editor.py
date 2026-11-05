@@ -402,7 +402,7 @@ class SoundEditorDialog(BaseDialog):
 
         zr = QHBoxLayout()
         zr.setSpacing(6)
-        hint = muted_label("양 끝을 끌어 남길 구간을 정해요.")
+        hint = muted_label("양 끝을 끌어 구간을 정해요. 오른쪽 클릭하면 그 자리부터 들어요.")
         hint.setStyleSheet(f"color: {C.grey400}; font-size: 12.5px;")
         zr.addWidget(hint)
         zr.addStretch(1)
@@ -498,7 +498,7 @@ class SoundEditorDialog(BaseDialog):
         self.resize(900, 640)
 
         if not ffmpeg.available():
-            self.loading_label.setText("통합 클라우드에서 프로그램을 업데이트해요. 소리 편집 도구가 없어요.")
+            self.loading_label.setText("통합 클라우드에서 프로그램을 업데이트하세요. 소리 편집 도구가 없어요.")
         else:
             run_async(ffmpeg.decode_mono, str(self.src), RATE, on_done=self._loaded, on_fail=self._load_failed)
 
@@ -531,7 +531,7 @@ class SoundEditorDialog(BaseDialog):
 
     def _load_failed(self, msg):
         self.loading_label.setText(error_message(
-            "파일이 열리는지 확인한 뒤 다시 골라요.", msg))
+            "파일이 열리는지 확인한 뒤 다시 고르세요.", msg))
 
     # ---------- 동기화 ----------
     def _from_wave(self, a, b):
@@ -615,13 +615,13 @@ class SoundEditorDialog(BaseDialog):
                 self._ph.subscribe(self)
             except Exception as e:
                 self.show_error(error_message(
-                    "스피커 연결을 확인한 뒤 다시 들어요.", e))
+                    "스피커 연결을 확인한 뒤 다시 들어 보세요.", e))
 
         def fail(msg):
             try:
                 self.btn_play.setEnabled(True)
                 self.show_error(error_message(
-                    "종소리 파일이 열리는지 확인해요.", msg))
+                    "종소리 파일이 열리는지 확인하세요.", msg))
             except RuntimeError:
                 pass
 
@@ -650,7 +650,7 @@ class SoundEditorDialog(BaseDialog):
         if self._loading:
             return "아직 음원을 불러오는 중이에요."
         if not self.name_edit.text().strip():
-            return "이름을 입력해요."
+            return "이름을 입력하세요."
         if self.wave.sel1 - self.wave.sel0 < 0.1:
             return "구간이 너무 짧아요."
         return None
@@ -706,7 +706,7 @@ class SoundEditorDialog(BaseDialog):
                 self.btn_ok.setText("저장")
                 self.btn_cancel.setEnabled(True)
                 self.show_error(error_message(
-                    "다른 프로그램에서 파일을 닫고 다시 저장해요.", msg))
+                    "다른 프로그램에서 파일을 닫고 다시 저장하세요.", msg))
             except RuntimeError:
                 pass
 

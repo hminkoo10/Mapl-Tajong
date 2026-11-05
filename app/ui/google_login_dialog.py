@@ -37,7 +37,7 @@ class GoogleLoginDialog(BaseDialog):
 
         notes = QVBoxLayout()
         notes.setSpacing(6)
-        for t in ("",
+        for t in ("로그인이 끝나면 브라우저 창을 닫고 ‘로그인을 마쳤어요’를 누르세요.",
                   "",
                   "",
                   "로그인 정보는 이 컴퓨터에만 저장해요."):
@@ -57,9 +57,9 @@ class GoogleLoginDialog(BaseDialog):
         if not found:
             self.spinner.hide()
             self.status.setText("Chrome이나 Edge를 찾지 못했어요")
-            self.show_error("Chrome이나 Edge를 설치해요.")
+            self.show_error("Chrome이나 Edge를 설치하세요.")
             return
-        self.status.setText(f"{found[0]} 창에서 구글 로그인해요")
+        self.status.setText(f"{found[0]} 창에서 구글 로그인하세요")
         self.btn_ok.setEnabled(True)
         run_async(google_login.run_login, self._cancel, self._bridge.text.emit, 900, found, self._finished,
                   on_done=self._ok, on_fail=self._fail)
@@ -96,7 +96,7 @@ class GoogleLoginDialog(BaseDialog):
             self.spinner.hide()
             self.status.setText("로그인하지 못했어요")
             self.show_error(error_message(
-                "인터넷 연결을 확인한 뒤 로그인 창을 다시 열어요.", msg))
+                "인터넷 연결을 확인한 뒤 로그인 창을 다시 여세요.", msg))
             self.btn_ok.hide()
             self.btn_cancel.setText("닫기")
         except RuntimeError:

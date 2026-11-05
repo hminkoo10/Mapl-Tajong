@@ -323,7 +323,7 @@ class ScheduleDialog(BaseDialog):
             b = Button(txt, variant="secondary", size="sm")
             b.clicked.connect(lambda _=False, m=mins: self.time_edit.add_minutes(m))
             qrow.addWidget(b)
-        hint = QLabel("")
+        hint = QLabel("칸을 누르고 숫자를 입력하세요.")
         hint.setStyleSheet(f"color: {C.grey500}; font-size: 12.5px;")
         qrow.addSpacing(6)
         qrow.addWidget(hint)
@@ -373,15 +373,15 @@ class ScheduleDialog(BaseDialog):
                                  str(s["name"]))
         except Exception as e:
             self.show_error(error_message(
-                "스피커 연결과 종소리 파일을 확인해요.", e))
+                "스피커 연결과 종소리 파일을 확인하세요.", e))
 
     def validate(self):
         if not self.name_edit.text().strip():
-            return "이름을 입력해요."
+            return "이름을 입력하세요."
         if self.days.mask() == 0:
-            return "요일을 하나 이상 골라요."
+            return "요일을 하나 이상 고르세요."
         if self.sound_combo.currentData() is None:
-            return "종소리를 골라요."
+            return "종소리를 고르세요."
         return None
 
     def get_value(self):
@@ -563,7 +563,7 @@ class BatchEditDialog(BaseDialog):
 
     def validate(self):
         if self.sec_days.active() and self.days.mask() == 0:
-            return "요일을 하나 이상 골라요."
+            return "요일을 하나 이상 고르세요."
         return None
 
     def get_changes(self):
@@ -665,9 +665,9 @@ class SoundInfoDialog(BaseDialog):
 
     def validate(self):
         if self.pick_file and not self.selected_path:
-            return "파일을 골라요."
+            return "파일을 고르세요."
         if not self.pick_file and not self.name_edit.text().strip():
-            return "이름을 입력해요."
+            return "이름을 입력하세요."
         return None
 
     def get_value(self):
@@ -685,7 +685,7 @@ class TextInputDialog(BaseDialog):
         QTimer.singleShot(0, self.edit.setFocus)
 
     def validate(self):
-        return None if self.edit.text().strip() else "내용을 입력해요."
+        return None if self.edit.text().strip() else "내용을 입력하세요."
 
     def value(self):
         return self.edit.text().strip()

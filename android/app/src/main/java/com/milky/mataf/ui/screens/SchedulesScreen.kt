@@ -259,9 +259,9 @@ fun ScheduleEditor(
     var volume by remember { mutableStateOf(((data?.volumeOverride ?: 1.0) * 100).toInt()) }
     var enabled by remember { mutableStateOf(data?.enabled ?: true) }
     val error = when {
-        name.isBlank() -> "이름을 입력해요."
-        mask == 0 -> "요일을 하나 이상 골라요."
-        soundId == null -> "종소리를 골라요."
+        name.isBlank() -> "이름을 입력하세요."
+        mask == 0 -> "요일을 하나 이상 고르세요."
+        soundId == null -> "종소리를 고르세요."
         else -> null
     }
     AppSheet(if (data == null) "일정 추가" else "일정 수정", onDismiss, footer = {

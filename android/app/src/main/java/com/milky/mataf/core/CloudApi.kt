@@ -41,11 +41,11 @@ class CloudApi(val server: String, private val token: String?) {
         fun enc(s: String): String = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 
         fun offline(e: Exception): CloudError = CloudError(0, "offline", when (e) {
-            is UnknownServiceException -> "서버와 보안 연결을 할 수 없어요. 서버 주소를 확인해 주세요. (https:// 필요)"
-            is SSLException -> "서버의 보안 연결을 확인하지 못했어요. 주소를 확인해 주세요."
-            is UnknownHostException -> "서버를 찾지 못했어요. 주소와 인터넷 연결을 확인해 주세요."
+            is UnknownServiceException -> "서버와 보안 연결을 할 수 없어요. 서버 주소를 확인하세요. (https:// 필요)"
+            is SSLException -> "서버의 보안 연결을 확인하지 못했어요. 주소를 확인하세요."
+            is UnknownHostException -> "서버를 찾지 못했어요. 주소와 인터넷 연결을 확인하세요."
             is SocketTimeoutException -> "서버가 응답하지 않아요. 잠시 뒤 다시 해 볼게요."
-            else -> "서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요."
+            else -> "서버에 연결하지 못했어요. 인터넷 연결을 확인하세요."
         })
     }
 
@@ -79,10 +79,10 @@ class CloudApi(val server: String, private val token: String?) {
         val body = try { r.body?.string().orEmpty() } catch (e: IOException) { "" }
         val err = runCatching { Json.parse(body).jObj()?.get("error").jObj() }.getOrNull()
         val msg = err?.get("message").jStr()?.takeIf { it.isNotBlank() } ?: when (r.code) {
-            401 -> "로그인이 끝났어요. 다시 로그인해 주세요."
+            401 -> "로그인이 끝났어요. 다시 로그인하세요."
             403 -> "이 계정으로는 쓸 수 없어요."
-            404 -> "서버에서 찾지 못했어요. 서버 주소를 확인해 주세요."
-            else -> "서버와 연결하지 못했어요. 인터넷 연결을 확인해 주세요. (HTTP ${r.code})"
+            404 -> "서버에서 찾지 못했어요. 서버 주소를 확인하세요."
+            else -> "서버와 연결하지 못했어요. 인터넷 연결을 확인하세요. (HTTP ${r.code})"
         }
         return CloudError(r.code, err?.get("code").jStr() ?: "http_${r.code}", msg, CloudModel.Entry.from(err?.get("entry").jObj()))
     }

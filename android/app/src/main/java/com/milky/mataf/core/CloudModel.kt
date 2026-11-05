@@ -238,7 +238,7 @@ object CloudModel {
     fun sanitizeManifest(m: Map<String, Any?>): Map<String, Any?> {
         val format = if (m.containsKey("format")) cleanLong(m["format"]) else FORMAT.toLong()
         require(m["app"] == APP && format != null && format >= 1) { "타종 프로그램 백업 파일이 아닙니다." }
-        require(format <= FORMAT) { "더 최신 버전에서 만든 백업입니다. 프로그램을 업데이트해 주세요." }
+        require(format <= FORMAT) { "더 최신 버전에서 만든 백업입니다. 프로그램을 업데이트하세요." }
         val counts = MAX_ROWS.mapValues { (table, limit) -> cleanLong(m["counts"].jObj()?.get(table))?.takeIf { it in 0..limit.toLong() } ?: 0L }
         val version = cleanText(m["app_version"] ?: "", 64, false) ?: ""
         val created = cleanText(m["created_at"] ?: "", 64, false) ?: ""

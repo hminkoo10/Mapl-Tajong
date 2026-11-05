@@ -75,19 +75,19 @@ object Updater {
 
     private fun friendly(e: Exception): String = when {
         e is UpdateError -> e.message ?: ""
-        e is HttpError && e.code == 401 -> "클라우드 로그인이 끝났어요. 다시 로그인한 뒤 업데이트해 주세요."
-        e is HttpError && e.code == 403 -> "이 계정에는 안드로이드 앱을 받을 권한이 없어요. 관리자에게 문의해 주세요."
-        e is HttpError && e.code == 404 -> "서버에서 이 버전을 찾지 못했어요. 업데이트를 다시 확인해 주세요."
+        e is HttpError && e.code == 401 -> "클라우드 로그인이 끝났어요. 다시 로그인한 뒤 업데이트하세요."
+        e is HttpError && e.code == 403 -> "이 계정에는 안드로이드 앱을 받을 권한이 없어요. 관리자에게 문의하세요."
+        e is HttpError && e.code == 404 -> "서버에서 이 버전을 찾지 못했어요. 업데이트를 다시 확인하세요."
         e is HttpError && e.code in setOf(429, 503) -> "업데이트 서버가 잠시 바빠요. 나중에 다시 확인할게요."
-        e is HttpError -> "새 버전을 받지 못했어요. 인터넷 연결을 확인하고 다시 해 주세요. (HTTP ${e.code})"
-        e is IOException -> "마고에듀 서버에 연결하지 못했어요. 서버 주소와 인터넷 연결을 확인한 뒤 다시 시도해 주세요."
-        else -> "서버의 업데이트 정보를 읽지 못했어요. 잠시 뒤 다시 확인해 주세요."
+        e is HttpError -> "새 버전을 받지 못했어요. 인터넷 연결을 확인하고 다시 하세요. (HTTP ${e.code})"
+        e is IOException -> "마고에듀 서버에 연결하지 못했어요. 서버 주소와 인터넷 연결을 확인한 뒤 다시 시도하세요."
+        else -> "서버의 업데이트 정보를 읽지 못했어요. 잠시 뒤 다시 확인하세요."
     }
 
     private class HttpError(val code: Int) : IOException("HTTP $code")
 
     private fun requireCredentials(value: Pair<String, String>?): Pair<String, String> {
-        if (value == null || value.second.isBlank()) throw UpdateError("마고에듀 통합 클라우드에 로그인한 뒤 업데이트를 확인해 주세요.")
+        if (value == null || value.second.isBlank()) throw UpdateError("마고에듀 통합 클라우드에 로그인한 뒤 업데이트를 확인하세요.")
         return value.first.trimEnd('/') to value.second
     }
 
@@ -95,7 +95,7 @@ object Updater {
         val base = server.toHttpUrlOrNull() ?: throw UpdateError("클라우드 서버 주소가 올바르지 않아요.")
         val target = url.toHttpUrlOrNull() ?: throw UpdateError("업데이트 주소가 올바르지 않아요.")
         if (target.scheme != base.scheme || target.host != base.host || target.port != base.port) {
-            throw UpdateError("클라우드 서버가 바뀌었어요. 업데이트를 다시 확인해 주세요.")
+            throw UpdateError("클라우드 서버가 바뀌었어요. 업데이트를 다시 확인하세요.")
         }
         // 공개 파일은 서버가 302로 보낼 수 있다. OkHttp는 다른 origin으로 넘어갈 때 Authorization을 제거한다.
         // HTTPS → HTTP 전환과 GitHub API 호출은 허용하지 않는다.
@@ -123,7 +123,7 @@ object Updater {
             val apps = data["apps"] as? List<*> ?: throw UpdateError("서버의 앱 목록을 읽지 못했어요.")
             val app = apps.mapNotNull { it.jObj() }.firstOrNull {
                 it["id"] == APP_ID && it["platform"] == "android" && it["allowed"] != false
-            } ?: throw UpdateError("서버에서 안드로이드 타종 앱을 찾지 못했어요. 앱 등록과 사용 권한을 확인해 주세요.")
+            } ?: throw UpdateError("서버에서 안드로이드 타종 앱을 찾지 못했어요. 앱 등록과 사용 권한을 확인하세요.")
             val rel = app["release"].jObj() ?: throw UpdateError("서버에 배포된 안드로이드 버전이 아직 없어요.")
             val version = rel["version"].jStr().orEmpty()
             val fileName = rel["fileName"].jStr().orEmpty()
@@ -270,7 +270,7 @@ class InstallReceiver : BroadcastReceiver() {
             else -> Updates.installFailed(when (st) {
                 PackageInstaller.STATUS_FAILURE_ABORTED -> "설치를 취소했어요."
                 PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ->
-                    "지금 앱과 서명이 달라서 설치할 수 없어요. 앱을 지우고 새 버전을 설치해 주세요."
+                    "지금 앱과 서명이 달라서 설치할 수 없어요. 앱을 지우고 새 버전을 설치하세요."
                 PackageInstaller.STATUS_FAILURE_STORAGE -> "저장 공간이 부족해서 설치하지 못했어요."
                 else -> "설치하지 못했어요. (${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: st})"
             })

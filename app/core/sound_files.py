@@ -106,7 +106,7 @@ def import_file(src):
         copy_atomic(src, dst)
     else:
         if not ffmpeg.available():
-            raise RuntimeError("이 형식은 변환이 필요한데 ffmpeg를 찾을 수 없어요. wav/mp3/ogg 파일을 사용해 주세요.")
+            raise RuntimeError("이 형식은 변환이 필요한데 ffmpeg를 찾을 수 없어요. wav/mp3/ogg 파일을 사용하세요.")
         dst = unique_path(stem, ".wav")
         write_atomic(dst, lambda tmp: ffmpeg.render(src, tmp))
     return dst

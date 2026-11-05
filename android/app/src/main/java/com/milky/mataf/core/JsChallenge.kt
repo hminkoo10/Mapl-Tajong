@@ -64,10 +64,10 @@ object JsChallenge {
     }
 
     private fun run(ctx: Context, code: String): String {
-        if (!JavaScriptSandbox.isSupported()) throw OnlineError("이 기기에서는 YouTube 주소를 풀 수 없어요. Android System WebView를 업데이트해 주세요.")
+        if (!JavaScriptSandbox.isSupported()) throw OnlineError("이 기기에서는 YouTube 주소를 풀 수 없어요. Android System WebView를 업데이트하세요.")
         JavaScriptSandbox.createConnectedInstanceAsync(ctx.applicationContext).get(10, TimeUnit.SECONDS).use { box ->
             if (!box.isFeatureSupported(JavaScriptSandbox.JS_FEATURE_EVALUATE_WITHOUT_TRANSACTION_LIMIT)) {
-                throw OnlineError("이 기기에서는 YouTube 주소를 풀 수 없어요. Android System WebView를 업데이트해 주세요.")
+                throw OnlineError("이 기기에서는 YouTube 주소를 풀 수 없어요. Android System WebView를 업데이트하세요.")
             }
             box.createIsolate().use { iso ->
                 return iso.evaluateJavaScriptAsync(code).get(60, TimeUnit.SECONDS)

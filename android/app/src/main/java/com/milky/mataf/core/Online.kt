@@ -288,7 +288,7 @@ object Online {
         } catch (e: OnlineError) {
             out.delete(); throw e
         } catch (e: IOException) {
-            out.delete(); throw OnlineError("인터넷 연결을 확인해 주세요.")
+            out.delete(); throw OnlineError("인터넷 연결을 확인하세요.")
         } catch (e: Exception) {
             out.delete(); throw e
         }
@@ -421,7 +421,7 @@ object Online {
     } catch (e: OnlineError) {
         throw e
     } catch (e: IOException) {
-        throw OnlineError("인터넷 연결을 확인해 주세요.")
+        throw OnlineError("인터넷 연결을 확인하세요.")
     } catch (e: Exception) {
         throw OnlineError(explain(e))
     }
@@ -438,7 +438,7 @@ object Online {
             "Paid" in n || "SoundCloudGoPlus" in n -> "유료 콘텐츠라 받을 수 없어요."
             "ContentNotAvailable" in n || "ContentNotSupported" in n -> "볼 수 없는 영상(곡)이에요."
             "ParsingException" in n || "Extraction" in n -> "이 영상(곡)의 정보를 읽지 못했어요. 앱을 업데이트하면 고쳐질 수 있어요."
-            e is IOException -> "인터넷 연결을 확인해 주세요."
+            e is IOException -> "인터넷 연결을 확인하세요."
             else -> "실패했어요: ${e.message ?: n}"
         }
     }

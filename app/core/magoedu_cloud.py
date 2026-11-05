@@ -267,11 +267,11 @@ def check(app_id: str) -> Session | None:
         return None
     keys = load_keys()
     if not keys:
-        REASON = "마고에듀 통합 클라우드에 한 번 로그인해 주세요."
+        REASON = "마고에듀 통합 클라우드에 한 번 로그인하세요."
         return None
     payload = verify_ticket(ticket, keys, app_id)
     if payload is None:
-        REASON = "실행 허가가 확인되지 않았어요. 통합 클라우드에서 다시 켜 주세요.\n(인터넷 없이 쓸 수 있는 기간이 지났다면 인터넷에 연결해 주세요.)"
+        REASON = "실행 허가가 확인되지 않았어요. 통합 클라우드에서 다시 켜세요.\n(인터넷 없이 쓸 수 있는 기간이 지났다면 인터넷에 연결하세요.)"
         return None
     data_dir = env.get("MAGOEDU_DATA_DIR")
     local_dir = env.get("MAGOEDU_LOCAL_DIR")

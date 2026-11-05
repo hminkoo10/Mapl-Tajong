@@ -185,7 +185,7 @@ fun SettingsScreen(extra: @Composable () -> Unit = {}) {
         Card {
             Text("정확히 울리게 하기", style = text(17, FontWeight.Bold))
             Spacer(Modifier.height(6.dp))
-            SettingRow("알람 및 리마인더", if (exactOk) " " else "정시에 울리려면 허용해요.") {
+            SettingRow("알람 및 리마인더", if (exactOk) " " else "정시에 울리려면 허용하세요.") {
                 if (!exactOk) Btn("허용하기", { Alarms.openExactSettings(ctx); refresh() }, style = BtnStyle.Soft, small = true)
                 else Text("허용됨", style = text(14, FontWeight.SemiBold, C.success))
             }
@@ -202,7 +202,7 @@ fun SettingsScreen(extra: @Composable () -> Unit = {}) {
                 else Text("제외됨", style = text(14, FontWeight.SemiBold, C.success))
             }
             Divider()
-            SettingRow("알림", if (notifOk) "알림에서 울리는 종을 멈춰요." else "알림에서 종을 멈추려면 허용해요.") {
+            SettingRow("알림", if (notifOk) "알림에서 울리는 종을 멈추세요." else "알림에서 종을 멈추려면 허용하세요.") {
                 if (!notifOk && Build.VERSION.SDK_INT >= 33) Btn("허용하기", { notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
                     style = BtnStyle.Soft, small = true)
                 else Text("허용됨", style = text(14, FontWeight.SemiBold, C.success))

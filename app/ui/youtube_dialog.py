@@ -297,7 +297,7 @@ class YoutubeDialog(BaseDialog):
         sl.addWidget(self.btn_cancel_dl)
         self.body.addWidget(self.state)
 
-        note = QLabel("사용이 허락된 소리만 받아요.")
+        note = QLabel("사용이 허락된 소리만 받으세요.")
         note.setStyleSheet(f"color: {C.grey400}; font-size: 12.5px;")
         self.body.addWidget(note)
 
@@ -312,13 +312,13 @@ class YoutubeDialog(BaseDialog):
         self.btn_cancel.setText("닫기")
         self._set_actions_enabled(False)
 
-        self._empty("검색어를 입력해요.")
+        self._empty("검색어를 입력하세요.")
         self._sync_login()
         if not youtube.available():
-            self._set_state("통합 클라우드에서 업데이트해요.", error=True)
+            self._set_state("통합 클라우드에서 업데이트하세요.", error=True)
             self.btn_search.setEnabled(False)
         elif not ffmpeg.available():
-            self._set_state("통합 클라우드에서 업데이트해요.", error=True)
+            self._set_state("통합 클라우드에서 업데이트하세요.", error=True)
         self.resize(820, 720)
         QTimer.singleShot(0, self.query.setFocus)
 
@@ -346,7 +346,7 @@ class YoutubeDialog(BaseDialog):
         self._fill_chips()
         self._sync_login()
         self.btn_search.setEnabled(self._dl is None)
-        self._empty("검색어를 입력해요.")
+        self._empty("검색어를 입력하세요.")
         self._set_state("")
         if self.query.text().strip() and not youtube.looks_like_url(self.query.text()):
             self.search()
@@ -445,7 +445,7 @@ class YoutubeDialog(BaseDialog):
             self.btn_search.setEnabled(True)
             self._empty("결과를 가져오지 못했어요")
             self._set_state(msg, error=True, error_summary=
-                            "인터넷 연결을 확인한 뒤 다시 찾아요.")
+                            "인터넷 연결을 확인한 뒤 다시 찾아 보세요.")
         except RuntimeError:
             pass
 
@@ -457,7 +457,7 @@ class YoutubeDialog(BaseDialog):
             return
         self.btn_search.setEnabled(True)
         if not results:
-            self._empty("다른 검색어로 찾아요.")
+            self._empty("다른 검색어로 찾아 보세요.")
             self._set_state("")
             return
         self._clear()
@@ -609,7 +609,7 @@ class YoutubeDialog(BaseDialog):
             edit = self._dl_edit
             self._dl_reset()
             self._set_state(msg, error=True, retry=lambda: self.download(edit=edit),
-                            error_summary="인터넷 연결을 확인해요. 로그인 안내가 나오면 구글 로그인해요.")
+                            error_summary="인터넷 연결을 확인하세요. 로그인 안내가 나오면 구글 로그인하세요.")
         except RuntimeError:
             pass
 
@@ -644,7 +644,7 @@ class YoutubeDialog(BaseDialog):
                 self.result_id = sound_files.add_sound_from_file(self.ctx.conn, src, name, 1.0)
         except Exception as e:
             self._set_state(str(e), error=True, error_summary=
-                            "다른 프로그램에서 파일을 닫고 다시 추가해요.")
+                            "다른 프로그램에서 파일을 닫고 다시 추가하세요.")
             return
         finally:
             try:

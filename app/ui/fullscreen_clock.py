@@ -115,7 +115,7 @@ class _WeatherNow(QWidget):
         self.data = None
         self.failed = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("날씨 지역 바꾸기")
+        self.setToolTip("눌러서 날씨 지역 바꾸기")
         self.th = THEMES["dark"]
         self.px = 40
 
@@ -143,7 +143,7 @@ class _WeatherNow(QWidget):
                 p.setPen(qc(*self.th["dim"]))
                 p.setFont(font(self.px * 0.5, QFont.Weight.Medium))
                 p.drawText(QRectF(self.rect()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
-                           "눌러서 날씨 지역을 확인해요.")
+                           "눌러서 날씨 지역을 확인하세요.")
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)

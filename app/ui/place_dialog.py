@@ -193,12 +193,12 @@ class PlaceDialog(BaseDialog):
                 self.results.addWidget(row)
             approx = places and places[0].get("approx")
             if places and places[0].get("exact"):
-                self.state.setText("건물 주소를 찾았어요.")
+                self.state.setText("건물 주소를 찾았어요. 눌러서 고르세요.")
             elif places:
                 self.state.setText((f"‘{approx}’ 근처예요. " if approx else "")
-                                   + f"{len(places)}곳을 찾았어요.")
+                                   + f"{len(places)}곳을 찾았어요. 눌러서 고르세요.")
             else:
-                self.state.setText("동네나 도로명 주소로 다시 찾아요.")
+                self.state.setText("동네나 도로명 주소로 다시 찾아 보세요.")
         except RuntimeError:
             pass
 
@@ -208,7 +208,7 @@ class PlaceDialog(BaseDialog):
                 return
             self.spinner.hide()
             self.btn_search.setEnabled(True)
-            self.state.setText("인터넷 연결을 확인하거나 아래 도시에서 골라요.")
+            self.state.setText("인터넷 연결을 확인하거나 아래 도시에서 골라 보세요.")
         except RuntimeError:
             pass
 

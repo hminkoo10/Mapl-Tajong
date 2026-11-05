@@ -164,7 +164,7 @@ def _friendly(e, logger):
     if "live event" in low or "is live" in low or "premieres in" in low:
         return "실시간 방송이나 예정된 영상은 받을 수 없어요."
     if "timed out" in low or "getaddrinfo" in low or "network is unreachable" in low or "connection" in low:
-        return "인터넷 연결을 확인해 주세요."
+        return "인터넷 연결을 확인하세요."
     if "max_filesize" in low or "larger than max" in low:
         return "파일이 너무 커요. 더 짧은 영상을 골라 주세요."
     if _is_blocked(msg):
@@ -280,7 +280,7 @@ def _source_error(e, logger, source):
         return _friendly(e, logger)
     low = (str(e) or "").lower()
     if "timed out" in low or "getaddrinfo" in low or "network is unreachable" in low or "connection" in low:
-        return "인터넷 연결을 확인해 주세요."
+        return "인터넷 연결을 확인하세요."
     if "404" in low or "not found" in low or "unavailable" in low:
         return "SoundCloud에서 찾을 수 없는 소리예요. (삭제·비공개)"
     if "max_filesize" in low or "larger than max" in low:

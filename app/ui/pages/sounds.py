@@ -121,7 +121,7 @@ class SoundsPage(QWidget):
         if not keep and t.rowCount():
             keep = [t.row_id(0)]
         t.select_ids(keep[:1])
-        self.footer.setText(f"{len(sounds)}개")
+        self.footer.setText(f"{len(sounds)}개 · 두 번 클릭하면 들어요")
         self._sync_buttons()
         if unknown:
             # mp3 등은 길이를 읽는 데 시간이 걸릴 수 있어 화면을 멈추지 않도록 뒤에서 계산한다
@@ -180,7 +180,7 @@ class SoundsPage(QWidget):
         def fail(msg):
             self.btn_add.setEnabled(True)
             notify(self, "추가하지 못했어요", error_message(
-                "파일이 열리는지 확인한 뒤 다시 골라요.", msg))
+                "파일이 열리는지 확인한 뒤 다시 고르세요.", msg))
 
         run_async(sound_files.import_file, path, on_done=done, on_fail=fail)
 
@@ -210,7 +210,7 @@ class SoundsPage(QWidget):
         n = repo.sound_usage_counts(self.conn).get(int(s["id"]), 0)
         if n:
             notify(self, "지금은 삭제할 수 없어요",
-                   f"시간표에서 다른 종소리로 바꾼 뒤 삭제해요. (사용 중: {n}개)")
+                   f"시간표에서 다른 종소리로 바꾼 뒤 삭제하세요. (사용 중: {n}개)")
             return
         if not confirm(self, f"{s['name']}을(를) 삭제할까요?", "종소리 파일도 함께 지워져요.", "삭제"):
             return
@@ -229,7 +229,7 @@ class SoundsPage(QWidget):
             self.eq.set_active(True)
         except Exception as e:
             notify(self, "재생하지 못했어요", error_message(
-                "스피커 연결과 종소리 파일을 확인해요.", e))
+                "스피커 연결과 종소리 파일을 확인하세요.", e))
 
     def on_stop(self):
         self.ctx.player.stop()

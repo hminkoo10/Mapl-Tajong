@@ -253,7 +253,7 @@ class LoginSession:
                 if proc.poll() is not None:
                     break
                 time.sleep(0.5)
-            raise LoginError("로그인 정보를 읽지 못했어요. 브라우저 창을 모두 닫고 다시 해 주세요.")
+            raise LoginError("로그인 정보를 읽지 못했어요. 브라우저 창을 모두 닫고 다시 하세요.")
         finally:
             try:
                 self._call("Browser.close", timeout=3)
@@ -270,12 +270,12 @@ def run_login(cancel_event=None, status_cb=None, timeout=900, browser=None, done
     (작업 스레드에서 호출) 성공하면 저장한 쿠키 수, 실패·취소하면 LoginError."""
     found = browser or find_browser()
     if not found:
-        raise LoginError("Chrome이나 Edge를 찾지 못했어요. 둘 중 하나를 설치한 뒤 다시 해 주세요.")
+        raise LoginError("Chrome이나 Edge를 찾지 못했어요. 둘 중 하나를 설치한 뒤 다시 하세요.")
     label, exe = found
     s = LoginSession(exe)
     s.open_login()
     if status_cb:
-        status_cb(f"{label} 창에서 구글 계정으로 로그인해 주세요")
+        status_cb(f"{label} 창에서 구글 계정으로 로그인하세요")
     start = time.monotonic()
     seen_open = False
     try:
@@ -283,7 +283,7 @@ def run_login(cancel_event=None, status_cb=None, timeout=900, browser=None, done
             if cancel_event is not None and cancel_event.is_set():
                 raise LoginError("로그인을 취소했어요.")
             if time.monotonic() - start > timeout:
-                raise LoginError("로그인을 기다리다 시간이 지났어요. 다시 해 주세요.")
+                raise LoginError("로그인을 기다리다 시간이 지났어요. 다시 하세요.")
             if done_event is not None and done_event.is_set():
                 break
             is_open = s.running()
@@ -298,7 +298,7 @@ def run_login(cancel_event=None, status_cb=None, timeout=900, browser=None, done
             raise LoginError("로그인을 취소했어요.")
         cookies = s.read_cookies()
         if not has_login(cookies):
-            raise LoginError("로그인이 확인되지 않았어요. 브라우저에서 YouTube까지 로그인한 뒤 창을 닫아 주세요.")
+            raise LoginError("로그인이 확인되지 않았어요. 브라우저에서 YouTube까지 로그인한 뒤 창을 닫으세요.")
         n = _write_cookies(cookies, cookie_file())
         if status_cb:
             status_cb("로그인했어요")

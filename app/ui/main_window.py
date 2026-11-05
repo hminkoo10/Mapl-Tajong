@@ -171,7 +171,7 @@ class MainWindow(QMainWindow):
             return
         self.hide()
         try:
-            self.tray.showMessage(APP_TITLE, "창을 닫아도 종은 울려요. 종료는 ‘프로그램 끄기’에서 해요.",
+            self.tray.showMessage(APP_TITLE, "창을 닫아도 종은 울려요. 종료는 ‘프로그램 끄기’에서 하세요.",
                                   QSystemTrayIcon.MessageIcon.Information, 1500)
         except Exception:
             pass
@@ -260,7 +260,8 @@ class MainWindow(QMainWindow):
     def on_exit_app(self):
         if self.isHidden():
             self._tray_show()
-        if not confirm(self, "프로그램을 끌까요?", "끄면 정해진 시간에 종이 울리지 않아요.",
+        if not confirm(self, "프로그램을 끌까요?", "끄면 정해진 시간에 종이 울리지 않아요.\n"
+                       "창만 숨기려면 오른쪽 위 X를 누르세요.",
                        "끄기", danger=True):
             return
         self._shutdown()

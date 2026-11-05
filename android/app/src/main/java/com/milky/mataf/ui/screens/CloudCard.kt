@@ -171,10 +171,10 @@ fun CloudGate() {
                 Column {
                     Text("마고 타종", style = text(26, FontWeight.ExtraBold))
                     Spacer(Modifier.height(6.dp))
-                    Text("통합 클라우드 아이디로 로그인해요", style = text(16, FontWeight.SemiBold, C.grey700))
+                    Text("통합 클라우드 아이디로 로그인하세요", style = text(16, FontWeight.SemiBold, C.grey700))
                 }
                 Text("같은 아이디의 모든 기기와 시간표·종소리·기록을 맞춰요.", style = text(14, color = C.grey600))
-                if (hasLocal) Text("시간표가 다르면 로그인 뒤 쓸 시간표를 골라요.",
+                if (hasLocal) Text("시간표가 다르면 로그인 뒤 쓸 시간표를 고르세요.",
                     style = text(14, color = C.grey600))
                 if (st.message.isNotEmpty()) Text(st.message, style = text(14, FontWeight.Medium, C.warning))
                 Card {
@@ -194,7 +194,7 @@ fun CloudGate() {
                     Spacer(Modifier.height(8.dp))
                     Btn(if (busy) "로그인하는 중" else "로그인", { go() }, Modifier.fillMaxWidth(), style = BtnStyle.Primary, large = true, enabled = ok)
                 }
-                Text("아이디는 원장님이나 운영자에게 받아요.", style = text(13, color = C.grey500))
+                Text("아이디는 원장님이나 운영자에게 받으세요.", style = text(13, color = C.grey500))
                 Btn("처음이세요? 사용 설명서 보기", {
                     try {
                         ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(helpUrl(server))))

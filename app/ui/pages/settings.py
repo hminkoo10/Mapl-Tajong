@@ -80,7 +80,7 @@ class SettingsPage(QWidget):
                 host = ""
             gen.body.addSpacing(6)
             gen.body.addWidget(_row("로그인한 아이디",
-                                    "아이디 변경은 통합 클라우드에서 해요.",
+                                    "아이디는 통합 클라우드에서 바꾸세요.",
                                     _value(" · ".join(x for x in (f"{user.get('name') or username} ({username})", host) if x),
                                            C.grey900)))
             gen.body.addWidget(hline())
@@ -258,7 +258,7 @@ class SettingsPage(QWidget):
             m = backup.export_backup(self.conn, path)
         except Exception as e:
             notify(self, "백업하지 못했어요", error_message(
-                "저장할 폴더와 남은 공간을 확인해요.", e))
+                "저장할 폴더와 남은 공간을 확인하세요.", e))
             return
         c = m["counts"]
         self.ctx.toast(f"백업했어요 · 일정 {c.get('schedules', 0)}개, 종소리 {c.get('sounds', 0)}개", "success", 3200)
@@ -271,7 +271,7 @@ class SettingsPage(QWidget):
             m = backup.read_manifest(path)
         except backup.BackupError as e:
             notify(self, "불러올 수 없어요", error_message(
-                "마고 타종에서 만든 백업 파일을 골라요.", e))
+                "마고 타종에서 만든 백업 파일을 고르세요.", e))
             return
         c = m.get("counts", {})
         if not confirm(self, "백업을 불러올까요?",
@@ -283,7 +283,7 @@ class SettingsPage(QWidget):
             backup.import_backup(self.conn, path, before_replace_files=self.ctx.player.stop)
         except Exception as e:
             notify(self, "불러오지 못했어요", error_message(
-                "다른 프로그램에서 종소리 파일을 닫고 다시 불러와요.", e))
+                "다른 프로그램에서 종소리 파일을 닫고 다시 불러오세요.", e))
             return
         self.ctx.changed("all")
         self.ctx.toast("백업을 불러왔어요", "success")
@@ -296,6 +296,6 @@ class SettingsPage(QWidget):
             n = backup.export_schedules_csv(self.conn, path)
         except Exception as e:
             notify(self, "내보내지 못했어요", error_message(
-                "엑셀에서 파일을 닫고 다시 저장해요.", e))
+                "엑셀에서 파일을 닫고 다시 저장하세요.", e))
             return
         self.ctx.toast(f"일정 {n}개를 저장했어요", "success")

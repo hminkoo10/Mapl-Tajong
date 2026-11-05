@@ -102,7 +102,7 @@ class BootReceiver : BroadcastReceiver() {
         if (!Cloud.isLoggedIn() && (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED)) {
             val repo = Repo(ctx)
             if (!Scheduler.isPaused(repo) && Scheduler.next(repo) != null) {
-                CloudService.notifyLogin(ctx, "마고에듀 통합 클라우드에 로그인해야 이 기기에서 종이 울려요. 앱을 열어 로그인해 주세요.")
+                CloudService.notifyLogin(ctx, "마고에듀 통합 클라우드에 로그인해야 이 기기에서 종이 울려요. 앱을 열어 로그인하세요.")
             }
         }
     }

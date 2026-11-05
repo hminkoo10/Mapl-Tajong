@@ -192,6 +192,6 @@ class LogsPage(QWidget):
             export_logs_csv(self._rows, path)
         except Exception as e:
             notify(self, "내보내지 못했어요", error_message(
-                "엑셀에서 파일을 닫고 다시 저장해요.", e))
+                "엑셀에서 파일을 닫고 다시 저장하세요.", e))
             return
         self.ctx.toast(f"{len(self._rows)}건을 저장했어요", "success")

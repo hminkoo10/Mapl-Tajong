@@ -195,7 +195,7 @@ fun SoundEditorScreen(target: EditTarget, onClose: () -> Unit) {
         val n = name.trim()
         when {
             wave == null -> return
-            n.isEmpty() -> { Toasts.show("이름을 입력해요", "warning"); return }
+            n.isEmpty() -> { Toasts.show("이름을 입력하세요", "warning"); return }
             b - a < 0.1 -> { Toasts.show("구간이 너무 짧아요", "warning"); return }
         }
         Preview.stop()
@@ -287,7 +287,7 @@ fun SoundEditorScreen(target: EditTarget, onClose: () -> Unit) {
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    Text("양 끝을 끌어 남길 구간을 정해요.", style = text(12, color = C.grey400))
+                    Text("양 끝을 끌어 구간을 정해요. 길게 누르면 그 자리부터 들어요.", style = text(12, color = C.grey400))
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Btn("확대", { zoom(0.6) }, small = true, style = BtnStyle.Subtle)

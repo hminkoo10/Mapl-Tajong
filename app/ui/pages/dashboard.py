@@ -517,7 +517,7 @@ class DashboardPage(QWidget):
         else:
             self.ring.set_state(0, "--:--", "")
             self.next_name.setText("예정된 종이 없어요")
-            self.next_when.setText("시간표에서 일정을 추가해요")
+            self.next_when.setText("시간표에서 일정을 추가하세요")
 
         ringing = self.sch.ring_enabled
         if ringing != self._ringing:
@@ -640,7 +640,7 @@ class DashboardPage(QWidget):
             self.eq.set_active(True)
         except Exception as e:
             self.ctx.toast(error_message(
-                "스피커 연결과 종소리 파일을 확인해요.", e), "error", 6000)
+                "스피커 연결과 종소리 파일을 확인하세요.", e), "error", 6000)
 
     def on_stop(self):
         self.ctx.player.stop()

@@ -110,7 +110,7 @@ fun SoundsScreen(onSearch: () -> Unit, onEdit: (Sound) -> Unit) {
                     onEdit = { onEdit(s) }, onInfo = { info = s },
                     onDelete = {
                         val n = usage[s.id] ?: 0
-                        if (n > 0) Toasts.show("시간표에서 다른 종소리로 바꾼 뒤 지워요. (사용 중: ${n}개)", "warning")
+                        if (n > 0) Toasts.show("시간표에서 다른 종소리로 바꾼 뒤 지우세요. (사용 중: ${n}개)", "warning")
                         else confirm = s
                     })
             }

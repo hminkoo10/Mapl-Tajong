@@ -125,7 +125,7 @@ object CloudEvents {
                 c.execute().use { resp ->
                     reached = true
                     if (resp.code == 401) {
-                        Cloud.unauthorized("로그인이 끝났어요. 다시 로그인해 주세요.")
+                        Cloud.unauthorized("로그인이 끝났어요. 다시 로그인하세요.")
                         return
                     }
                     if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
