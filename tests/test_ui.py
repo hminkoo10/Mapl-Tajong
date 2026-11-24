@@ -1,11 +1,14 @@
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import traceback
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 from unittest.mock import Mock
 
 from PyQt6.QtCore import QPoint, QRectF, Qt
@@ -13,9 +16,11 @@ from PyQt6.QtGui import QFont, QFontMetricsF
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
+from app.core import paths
 from app.data.db import init_schema
 from app.ui.context import AppContext
 from app.ui.pages.schedules import SchedulesPage, _SelectionBar
+from app.ui.pages.sounds import SoundsPage
 from app.ui.select import Select
 from app.ui.theme import app_font, font, load_fonts, reset_font_cache
 from app.ui.widgets import ToastManager
@@ -194,6 +199,60 @@ class UiRegressionTests(unittest.TestCase):
                                                 QFontMetricsF(font(14, QFont.Weight.Bold)).horizontalAdvance(action))
                     self.render(f"toast-wrap-{i}-{width}")
                 manager._remove(toast)
+
+    def _sounds_page(self, rows):
+        tmp = Path(tempfile.mkdtemp(prefix="tajong_ui_mp3_"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        paths.configure(tmp / "sync", tmp / "local")
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        conn.row_factory = sqlite3.Row
+        init_schema(conn, (ROOT / "app/data/schema.sql").read_text(encoding="utf-8"))
+        for sid, name, file_name in rows:
+            shutil.copy2(ROOT / "app/assets/sounds/bell1.wav", paths.sounds_dir() / file_name)
+            conn.execute("INSERT INTO sounds(id, name, file_name) VALUES(?, ?, ?)", (sid, name, file_name))
+        conn.commit()
+        ctx = AppContext(conn, Mock(is_playing=Mock(return_value=False)),
+                         SimpleNamespace(invalidate=Mock(), recompute_next=Mock()))
+        toasts = []
+        ctx.toast = lambda text, kind="info", *a, **k: toasts.append((text, kind))
+        page = SoundsPage(ctx)
+        QVBoxLayout(self.host).addWidget(page)
+        QTest.qWait(30)
+        return tmp, page, toasts
+
+    def test_save_selected_sound_as_mp3(self):
+        tmp, page, toasts = self._sounds_page([(1, "1교시 종", "bell1.wav"), (2, "쉬는 시간", "bell2.wav")])
+        page.table.select_ids([2])
+        QTest.qWait(30)
+        self.assertTrue(page.btn_mp3.isEnabled())
+        out = tmp / "받은 파일" / "쉬는 시간"           # 확장자를 지워도 .mp3 로 저장
+        out.parent.mkdir()
+        with mock.patch("app.ui.pages.sounds.QFileDialog.getSaveFileName",
+                        return_value=(str(out), "MP3 (*.mp3)")) as dlg:
+            QTest.mouseClick(page.btn_mp3, Qt.MouseButton.LeftButton)
+        self.assertTrue(dlg.call_args.args[2].endswith("쉬는 시간.mp3"))
+        self.assertFalse(page.btn_mp3.isEnabled())
+        for _ in range(500):
+            if page.btn_mp3.isEnabled():
+                break
+            QTest.qWait(20)
+        self.assertEqual(toasts[-1], ("MP3로 저장했어요", "success"))
+        saved = out.with_name("쉬는 시간.mp3")
+        self.assertEqual(saved.read_bytes()[:3], b"ID3")
+        self.assertEqual(sorted(p.name for p in out.parent.iterdir()), ["쉬는 시간.mp3"])
+        self.render("sounds-mp3")
+
+    def test_save_mp3_needs_a_sound(self):
+        _, page, _ = self._sounds_page([])
+        self.assertFalse(page.btn_mp3.isEnabled())
+
+    def test_save_mp3_cancel(self):
+        _, page, toasts = self._sounds_page([(1, "종", "bell1.wav")])
+        with mock.patch("app.ui.pages.sounds.QFileDialog.getSaveFileName", return_value=("", "")):
+            QTest.mouseClick(page.btn_mp3, Qt.MouseButton.LeftButton)
+        self.assertTrue(page.btn_mp3.isEnabled())
+        self.assertEqual(toasts, [])
 
 
 if __name__ == "__main__":

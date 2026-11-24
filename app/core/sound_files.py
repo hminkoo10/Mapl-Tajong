@@ -118,6 +118,18 @@ def add_sound_from_file(conn, src, name, volume=1.0):
     return repo.insert_sound(conn, (name or Path(src).stem).strip(), dst.name, float(volume))
 
 
+def export_mp3(src, dst):
+    """종소리 파일을 dst 에 MP3 로 저장한다 (작업 스레드용). 원래 mp3 면 그대로 복사한다."""
+    src, dst = Path(src), Path(dst)
+    if not src.exists():
+        raise FileNotFoundError("종소리 파일을 찾을 수 없어요.")
+    if src.suffix.lower() == ".mp3":
+        return copy_atomic(src, dst)
+    if not ffmpeg.available():
+        raise RuntimeError("MP3로 바꾸는 데 필요한 도구(ffmpeg)를 찾을 수 없어요.")
+    return write_atomic(dst, lambda tmp: ffmpeg.encode_mp3(src, tmp))
+
+
 def render_edit_new(src, params: EditParams, duration, name):
     """편집 결과를 새 파일로 만든다 (작업 스레드용). 만든 경로를 돌려준다."""
     dst = unique_path(safe_stem(name), ".wav")

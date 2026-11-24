@@ -1,6 +1,9 @@
 package com.milky.mataf.ui.screens
 
 import android.net.Uri
+import android.provider.DocumentsContract
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -41,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.milky.mataf.core.Alarms
 import com.milky.mataf.core.AppEvents
+import com.milky.mataf.core.AudioEdit
 import com.milky.mataf.core.Preview
 import com.milky.mataf.core.Sounds
 import com.milky.mataf.core.SoundPicker
@@ -65,6 +69,7 @@ import com.milky.mataf.ui.theme.C
 import com.milky.mataf.ui.theme.text
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -81,6 +86,29 @@ fun SoundsScreen(onSearch: () -> Unit, onEdit: (Sound) -> Unit) {
     var info by remember { mutableStateOf<Sound?>(null) }
     val picker by SoundPicker.state.collectAsState()
     var confirm by remember { mutableStateOf<Sound?>(null) }
+    // 저장할 곳을 고르는 동안 화면이 다시 만들어져도 어떤 종소리인지 잊지 않게
+    var mp3Of by rememberSaveable { mutableStateOf<Long?>(null) }
+    var savingMp3 by remember { mutableStateOf(false) }
+    val mp3Saver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/mpeg")) { uri ->
+        val s = mp3Of?.let { id -> repo.sounds().firstOrNull { it.id == id } }
+        mp3Of = null
+        if (uri == null || s == null) return@rememberLauncherForActivityResult
+        savingMp3 = true
+        Toasts.show("MP3로 저장하고 있어요")
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    ctx.contentResolver.openOutputStream(uri)!!.buffered().use { AudioEdit.exportMp3(Sounds.file(ctx, s.fileName), it) }
+                }
+                Toasts.show("MP3로 저장했어요", "success")
+            } catch (e: Exception) {
+                withContext(NonCancellable + Dispatchers.IO) { runCatching { DocumentsContract.deleteDocument(ctx.contentResolver, uri) } }
+                Toasts.show("저장하지 못했어요: ${e.message ?: e}", "error")
+            } finally {
+                savingMp3 = false
+            }
+        }
+    }
 
     // 길이는 파일을 열어 봐야 알 수 있어 뒤에서 계산한다
     androidx.compose.runtime.LaunchedEffect(version) {
@@ -108,6 +136,10 @@ fun SoundsScreen(onSearch: () -> Unit, onEdit: (Sound) -> Unit) {
                         else Preview.play(ctx, Sounds.file(ctx, s.fileName).absolutePath, s.volume, s.name) { Toasts.show(it, "error") }
                     },
                     onEdit = { onEdit(s) }, onInfo = { info = s },
+                    onSaveMp3 = {
+                        if (savingMp3) Toasts.show("MP3로 저장하고 있어요. 끝난 뒤 다시 누르세요.")
+                        else { mp3Of = s.id; mp3Saver.launch("${Sounds.safeStem(s.name)}.mp3") }
+                    },
                     onDelete = {
                         val n = usage[s.id] ?: 0
                         if (n > 0) Toasts.show("시간표에서 다른 종소리로 바꾼 뒤 지우세요. (사용 중: ${n}개)", "warning")
@@ -153,7 +185,7 @@ fun SoundsScreen(onSearch: () -> Unit, onEdit: (Sound) -> Unit) {
 
 @Composable
 private fun SoundRow(s: Sound, used: Int, duration: String, playing: Boolean, onPlay: () -> Unit, onEdit: () -> Unit,
-                     onInfo: () -> Unit, onDelete: () -> Unit) {
+                     onInfo: () -> Unit, onSaveMp3: () -> Unit, onDelete: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onPlay).padding(horizontal = 10.dp, vertical = 12.dp),
@@ -173,6 +205,7 @@ private fun SoundRow(s: Sound, used: Int, duration: String, playing: Boolean, on
             AppMenu(menu, { menu = false }, listOf(
                 MenuItem("자르기·다듬기", onClick = onEdit),
                 MenuItem("이름·음량", onClick = onInfo),
+                MenuItem("MP3로 저장", onClick = onSaveMp3),
                 MenuItem("삭제", danger = true, onClick = onDelete),
             ))
         }

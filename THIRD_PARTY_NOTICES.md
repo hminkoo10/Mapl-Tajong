@@ -13,4 +13,10 @@
 | pygame (SDL) | 소리 재생 | LGPL-2.1 / zlib | https://github.com/pygame/pygame |
 | Pretendard | 글꼴 | SIL OFL 1.1 | https://github.com/orioncactus/pretendard |
 
+휴대폰(안드로이드) 앱에는 아래 프로그램이 더 들어 있어요.
+
+| 이름 | 쓰는 곳 | 사용 조건 | 소스 |
+|---|---|---|---|
+| jump3r 1.0.5 (LAME 을 자바로 옮긴 것) | 종소리를 MP3로 저장 | LGPL-2.1 이상 | https://repo1.maven.org/maven2/de/sciss/jump3r/1.0.5/jump3r-1.0.5-sources.jar |
+
 날씨 정보: 노르웨이 기상청(MET Norway) Locationforecast, CC BY 4.0 — https://api.met.no

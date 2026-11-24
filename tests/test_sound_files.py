@@ -2,7 +2,10 @@
 
     python -m unittest tests.test_sound_files
 """
+import math
+import re
 import shutil
+import struct
 import sys
 import tempfile
 import unittest
@@ -90,6 +93,87 @@ class AtomicWriteTests(unittest.TestCase):
         (self.sounds / "crash.wav.tmp").write_bytes(b"half")
         self.assertEqual(sound_files.remove_leftover_tmp(self.sounds), 1)
         self.assertEqual(sorted(p.name for p in self.sounds.iterdir()), ["keep.wav"])
+
+
+def _probe(path):
+    """ffmpeg 가 읽은 (코덱, 샘플레이트, 길이초)"""
+    r = ffmpeg._run(["-i", str(path)], timeout=20, capture_stdout=False)
+    text = (r.stderr or b"").decode("utf-8", "replace")
+    m = re.search(r"Audio:\s*(\w+).*?(\d+) Hz", text)
+    return (m.group(1), int(m.group(2))) if m else (None, None), ffmpeg.probe_duration(path)
+
+
+def _sine_wav(path, rate, seconds, channels=1):
+    n = int(rate * seconds)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(channels)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        frame = lambda i: struct.pack("<h", int(12000 * math.sin(2 * math.pi * 440 * i / rate))) * channels
+        w.writeframes(b"".join(frame(i) for i in range(n)))
+
+
+@unittest.skipUnless(ffmpeg.available(), "ffmpeg 없음")
+class Mp3ExportTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="tajong_mp3_"))
+        paths.configure(self.tmp / "sync", self.tmp / "local")
+        self.out_dir = self.tmp / "내 문서"          # 한글·빈칸이 있는 폴더에도 저장
+        self.out_dir.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def leftovers(self):
+        return sorted(p.name for p in self.out_dir.iterdir() if p.name.endswith(".tmp"))
+
+    def test_wav_becomes_playable_mp3_of_same_length(self):
+        dst = self.out_dir / "1교시 종.mp3"
+        self.assertEqual(sound_files.export_mp3(BELL, dst), dst)
+        (codec, rate), dur = _probe(dst)
+        self.assertEqual(codec, "mp3")
+        self.assertEqual(rate, 44100)
+        with wave.open(str(BELL), "rb") as w:
+            wav_dur = w.getnframes() / w.getframerate()
+        self.assertAlmostEqual(dur, wav_dur, delta=0.1)
+        self.assertEqual(self.leftovers(), [])
+
+    def test_high_sample_rate_wav_is_converted(self):
+        src = self.tmp / "hi.wav"                  # MP3 가 받지 않는 96kHz 도 저장된다
+        _sine_wav(src, 96000, 1.5)
+        dst = sound_files.export_mp3(src, self.out_dir / "hi.mp3")
+        (codec, rate), dur = _probe(dst)
+        self.assertEqual(codec, "mp3")
+        self.assertLessEqual(rate, 48000)
+        self.assertAlmostEqual(dur, 1.5, delta=0.1)
+
+    def test_mp3_is_copied_without_converting_again(self):
+        src = paths.sounds_dir() / "already.mp3"
+        ffmpeg.encode_mp3(BELL, src)
+        dst = sound_files.export_mp3(src, self.out_dir / "copy.mp3")
+        self.assertEqual(dst.read_bytes(), src.read_bytes())
+
+    def test_overwrites_existing_file(self):
+        dst = self.out_dir / "old.mp3"
+        dst.write_bytes(b"old")
+        sound_files.export_mp3(BELL, dst)
+        self.assertEqual(_probe(dst)[0][0], "mp3")
+        self.assertEqual(self.leftovers(), [])
+
+    def test_failure_keeps_existing_file_and_removes_tmp(self):
+        bad = self.tmp / "broken.wav"
+        bad.write_bytes(b"not a sound")
+        dst = self.out_dir / "keep.mp3"
+        dst.write_bytes(b"old")
+        with self.assertRaises(ffmpeg.FfmpegError):
+            sound_files.export_mp3(bad, dst)
+        self.assertEqual(dst.read_bytes(), b"old")
+        self.assertEqual(self.leftovers(), [])
+
+    def test_missing_sound_file(self):
+        with self.assertRaises(FileNotFoundError):
+            sound_files.export_mp3(self.tmp / "없음.wav", self.out_dir / "x.mp3")
+        self.assertEqual(list(self.out_dir.iterdir()), [])
 
 
 class DurationFormatTests(unittest.TestCase):

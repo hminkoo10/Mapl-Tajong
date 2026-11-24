@@ -117,3 +117,12 @@ def render(src, dst, audio_filter=None, rate=44100, channels=2):
 
 def amplify(src, dst, gain):
     return render(src, dst, f"volume={float(gain):.3f}")
+
+
+def encode_mp3(src, dst, bitrate="192k"):
+    """src를 MP3로 저장. (dst 가 .tmp 여도 MP3 가 되도록 형식을 직접 정한다)"""
+    args = ["-y", "-i", str(src), "-vn", "-c:a", "libmp3lame", "-b:a", bitrate, "-f", "mp3", str(dst)]
+    r = _run(args, timeout=600, capture_stdout=False)
+    if r.returncode != 0 or not Path(dst).exists():
+        raise FfmpegError("MP3로 바꾸지 못했어요.\n" + _tail(r.stderr))
+    return Path(dst)

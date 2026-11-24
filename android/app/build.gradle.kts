@@ -119,6 +119,8 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
     // YouTube 주소의 n 값·서명 풀기 스크립트를 돌리는 JavaScript 엔진 (core/JsChallenge.kt)
     implementation("androidx.javascriptengine:javascriptengine:1.1.1")
+    // 종소리를 MP3 로 저장 (LAME 을 자바로 옮긴 것, LGPL-2.1+). 안드로이드에는 MP3 로 바꾸는 기능이 없다 (core/Mp3.kt)
+    implementation("de.sciss:jump3r:1.0.5")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")

@@ -7,6 +7,7 @@ import android.media.MediaFormat
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import java.io.File
+import java.io.OutputStream
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -221,6 +222,26 @@ object AudioEdit {
         raf.close()
         if (written == 0L) {
             dst.delete(); throw IllegalStateException("고른 구간에 소리가 없어요.")
+        }
+    }
+
+    /** 종소리 파일을 MP3 로 out 에 쓴다. 원래 mp3 면 그대로 복사한다 */
+    suspend fun exportMp3(src: File, out: OutputStream) {
+        if (!src.exists()) throw IllegalStateException("종소리 파일을 찾을 수 없어요.")
+        if (src.extension.equals("mp3", ignoreCase = true)) {
+            src.inputStream().use { it.copyTo(out) }
+            return
+        }
+        var enc: Mp3Encoder? = null
+        try {
+            decode(src) { _, s, ch, rate ->
+                val e = enc ?: Mp3Encoder(rate, ch).also { enc = it }
+                e.encode(s, ch, out)
+                true
+            }
+            (enc ?: throw IllegalStateException("소리를 풀지 못했어요.")).finish(out)
+        } finally {
+            enc?.close()
         }
     }
 
