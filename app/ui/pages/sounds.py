@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PyQt6.QtCore import QStandardPaths, Qt, QTimer
+from PyQt6.QtCore import QSize, QStandardPaths, Qt, QTimer
 from PyQt6.QtWidgets import QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QVBoxLayout, QWidget
 
 from app.core import sound_files
@@ -17,6 +17,15 @@ from app.ui.workers import run_async
 from app.ui.youtube_dialog import YoutubeDialog
 
 
+class _RowButton(Button):
+    """창을 가장 작게 해도 단추 줄이 한 줄에 들어가게, 양옆 여백만 4px까지 고르게 줄어드는 단추.
+    (보통 Button 은 최소 크기가 제 크기라, 자리가 모자라면 Qt 가 가장 큰 단추부터 깎아 글자가 테두리에 붙는다)"""
+
+    def minimumSizeHint(self):
+        s = self.sizeHint()
+        return QSize(s.width() - 8, s.height())
+
+
 class SoundsPage(QWidget):
     def __init__(self, ctx):
         super().__init__()
@@ -27,26 +36,25 @@ class SoundsPage(QWidget):
         root.setSpacing(16)
 
         header = PageHeader("종소리", " ")
-        self.btn_mp3 = Button("MP3로 저장", variant="white")
-        header.right.addWidget(self.btn_mp3)
         root.addWidget(header)
 
         bar = QHBoxLayout()
         bar.setSpacing(8)
-        self.btn_yt = Button("인터넷에서 찾기", icon_name="search", variant="primary")
-        self.btn_add = Button("파일 추가", variant="white")
+        self.btn_yt = _RowButton("인터넷에서 찾기", icon_name="search", variant="primary")
+        self.btn_add = _RowButton("파일 추가", variant="white")
         bar.addWidget(self.btn_yt)
         bar.addWidget(self.btn_add)
         bar.addStretch(1)
         self.eq = EqualizerBars()
         bar.addWidget(self.eq)
         bar.addSpacing(4)
-        self.btn_play = Button("들어보기", icon_name="play", variant="white")
+        self.btn_play = _RowButton("들어보기", icon_name="play", variant="white")
         self.btn_stop = IconButton("stop", "정지", "white")
-        self.btn_editor = Button("자르기·다듬기", variant="white")
-        self.btn_info = Button("이름·음량", variant="white")
-        self.btn_del = Button("삭제", variant="danger")
-        for b in (self.btn_play, self.btn_stop, self.btn_editor, self.btn_info, self.btn_del):
+        self.btn_editor = _RowButton("자르기·다듬기", variant="white")
+        self.btn_info = _RowButton("이름·음량", variant="white")
+        self.btn_mp3 = _RowButton("MP3로 저장", variant="white")
+        self.btn_del = _RowButton("삭제", variant="danger")
+        for b in (self.btn_play, self.btn_stop, self.btn_editor, self.btn_info, self.btn_mp3, self.btn_del):
             bar.addWidget(b)
         root.addLayout(bar)
 

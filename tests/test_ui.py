@@ -14,7 +14,7 @@ from unittest.mock import Mock
 from PyQt6.QtCore import QPoint, QRectF, Qt
 from PyQt6.QtGui import QFont, QFontMetricsF
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QStackedWidget, QVBoxLayout, QWidget
 
 from app.core import paths
 from app.data.db import init_schema
@@ -22,7 +22,7 @@ from app.ui.context import AppContext
 from app.ui.pages.schedules import SchedulesPage, _SelectionBar
 from app.ui.pages.sounds import SoundsPage
 from app.ui.select import Select
-from app.ui.theme import app_font, font, load_fonts, reset_font_cache
+from app.ui.theme import app_font, build_stylesheet, font, load_fonts, reset_font_cache
 from app.ui.widgets import ToastManager
 
 
@@ -242,6 +242,30 @@ class UiRegressionTests(unittest.TestCase):
         self.assertEqual(saved.read_bytes()[:3], b"ID3")
         self.assertEqual(sorted(p.name for p in out.parent.iterdir()), ["쉬는 시간.mp3"])
         self.render("sounds-mp3")
+
+    def test_sound_buttons_fit_one_row_in_smallest_window(self):
+        _, page, _ = self._sounds_page([(1, "종", "bell1.wav")])
+        stack = QStackedWidget(self.host)                 # 메인 창처럼 화면 전환 틀에 넣는다 (쪽의 최소 너비를 무시하고 맞춤)
+        stack.setStyleSheet(build_stylesheet(paths.ui_cache_dir()))   # 앱과 같은 스타일 (Button 의 min-width: 0 포함)
+        stack.addWidget(page)
+        stack.setGeometry(0, 0, 1060 - 220, 700)          # 가장 작은 창(1060)에서 왼쪽 메뉴(220)를 뺀 너비
+        stack.show()
+        QTest.qWait(50)
+        self.assertEqual(page.width(), 840)
+        row = [page.btn_yt, page.btn_add, page.btn_play, page.btn_stop, page.btn_editor, page.btn_info,
+               page.btn_mp3, page.btn_del]
+        tops = {b.mapTo(page, QPoint()).y() for b in row}
+        self.assertEqual(len(tops), 1)                    # 모두 한 줄
+        lefts = [b.mapTo(page, QPoint()).x() for b in row]
+        self.assertEqual(lefts, sorted(lefts))
+        self.assertEqual(row.index(page.btn_mp3), row.index(page.btn_info) + 1)
+        for a, b in zip(row, row[1:]):
+            self.assertLessEqual(a.mapTo(page, QPoint()).x() + a.width(), b.mapTo(page, QPoint()).x())
+        self.assertLessEqual(page.btn_del.mapTo(page, QPoint()).x() + page.btn_del.width(), page.width() - 28)
+        for b in row:                                     # 글자 양옆 여백은 12px 넘게 남는다
+            self.assertGreaterEqual(b.width(), b.sizeHint().width() - 8, b.text())
+        self.assertEqual(page.btn_stop.width(), page.btn_stop.sizeHint().width())
+        self.render("sounds-row-1060")
 
     def test_save_mp3_needs_a_sound(self):
         _, page, _ = self._sounds_page([])
