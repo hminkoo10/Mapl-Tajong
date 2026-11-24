@@ -25,8 +25,10 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,7 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.milky.mataf.core.Alarms
 import com.milky.mataf.core.AppEvents
-import com.milky.mataf.core.AudioEdit
+import com.milky.mataf.core.Mp3Export
 import com.milky.mataf.core.Preview
 import com.milky.mataf.core.Sounds
 import com.milky.mataf.core.SoundPicker
@@ -69,7 +71,7 @@ import com.milky.mataf.ui.theme.C
 import com.milky.mataf.ui.theme.text
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -88,25 +90,22 @@ fun SoundsScreen(onSearch: () -> Unit, onEdit: (Sound) -> Unit) {
     var confirm by remember { mutableStateOf<Sound?>(null) }
     // 저장할 곳을 고르는 동안 화면이 다시 만들어져도 어떤 종소리인지 잊지 않게
     var mp3Of by rememberSaveable { mutableStateOf<Long?>(null) }
-    var savingMp3 by remember { mutableStateOf(false) }
+    val saving by Mp3Export.state.collectAsState()
+    // 금방 끝나면(짧은 종소리, 원래 mp3) 막대 없이 끝났다는 안내만 보인다
+    var showSaving by remember { mutableStateOf(false) }
+    LaunchedEffect(saving != null) {
+        showSaving = false
+        if (saving != null) {
+            delay(300); showSaving = true
+        }
+    }
     val mp3Saver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/mpeg")) { uri ->
         val s = mp3Of?.let { id -> repo.sounds().firstOrNull { it.id == id } }
         mp3Of = null
         if (uri == null || s == null) return@rememberLauncherForActivityResult
-        savingMp3 = true
-        Toasts.show("MP3로 저장하고 있어요")
-        scope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    ctx.contentResolver.openOutputStream(uri)!!.buffered().use { AudioEdit.exportMp3(Sounds.file(ctx, s.fileName), it) }
-                }
-                Toasts.show("MP3로 저장했어요", "success")
-            } catch (e: Exception) {
-                withContext(NonCancellable + Dispatchers.IO) { runCatching { DocumentsContract.deleteDocument(ctx.contentResolver, uri) } }
-                Toasts.show("저장하지 못했어요: ${e.message ?: e}", "error")
-            } finally {
-                savingMp3 = false
-            }
+        if (!Mp3Export.start(ctx, s, uri)) {
+            runCatching { DocumentsContract.deleteDocument(ctx.contentResolver, uri) }
+            Toasts.show("MP3로 저장하고 있어요. 끝난 뒤 다시 누르세요.")
         }
     }
 
@@ -126,6 +125,19 @@ fun SoundsScreen(onSearch: () -> Unit, onEdit: (Sound) -> Unit) {
             Btn("취소", { SoundPicker.cancel(ctx) }, style = BtnStyle.White)
         }
         if (picker.importing) Text("종소리를 추가하는 중…", style = text(14, color = C.grey500))
+        saving?.takeIf { showSaving }?.let { m ->
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val name = if (m.name.length <= 20) m.name else m.name.take(19) + "…"
+                    Text(if (m.cancelling) "취소하고 있어요" else "‘${name}’ MP3로 저장하고 있어요 ${(m.progress * 100).toInt()}%",
+                        style = text(14, color = C.grey700), modifier = Modifier.weight(1f))
+                    Btn("취소", { Mp3Export.cancel() }, style = BtnStyle.White, enabled = !m.cancelling)
+                }
+                // 회색 화면 위에서도 남은 길이가 보이게 바탕을 한 단계 진하게
+                LinearProgressIndicator({ m.progress }, Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                    color = C.accent, trackColor = C.grey200)
+            }
+        }
         Card(padding = 8.dp) {
             if (sounds.isEmpty()) Empty("종소리가 없어요")
             sounds.forEachIndexed { i, s ->
@@ -137,7 +149,7 @@ fun SoundsScreen(onSearch: () -> Unit, onEdit: (Sound) -> Unit) {
                     },
                     onEdit = { onEdit(s) }, onInfo = { info = s },
                     onSaveMp3 = {
-                        if (savingMp3) Toasts.show("MP3로 저장하고 있어요. 끝난 뒤 다시 누르세요.")
+                        if (saving != null) Toasts.show("MP3로 저장하고 있어요. 끝난 뒤 다시 누르세요.")
                         else { mp3Of = s.id; mp3Saver.launch("${Sounds.safeStem(s.name)}.mp3") }
                     },
                     onDelete = {

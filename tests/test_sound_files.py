@@ -8,9 +8,11 @@ import shutil
 import struct
 import sys
 import tempfile
+import threading
 import unittest
 import wave
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -113,6 +115,14 @@ def _sine_wav(path, rate, seconds, channels=1):
         w.writeframes(b"".join(frame(i) for i in range(n)))
 
 
+def _long_flac(path, seconds):
+    """긴 종소리 (사인파 FLAC 은 작아서 빨리 만든다)"""
+    r = ffmpeg._run(["-y", "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}:sample_rate=44100", "-ac", "2",
+                     "-c:a", "flac", str(path)], timeout=60, capture_stdout=False)
+    assert r.returncode == 0, ffmpeg._tail(r.stderr)
+    return path
+
+
 @unittest.skipUnless(ffmpeg.available(), "ffmpeg 없음")
 class Mp3ExportTests(unittest.TestCase):
     def setUp(self):
@@ -174,6 +184,50 @@ class Mp3ExportTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             sound_files.export_mp3(self.tmp / "없음.wav", self.out_dir / "x.mp3")
         self.assertEqual(list(self.out_dir.iterdir()), [])
+
+    def test_reports_progress_until_done(self):
+        src = _long_flac(self.tmp / "긴 종.flac", 180)
+        seen = []
+        dst = sound_files.export_mp3(src, self.out_dir / "긴 종.mp3", on_progress=seen.append)
+        self.assertEqual(seen[-1], 1.0)
+        self.assertEqual(seen, sorted(seen))                      # 뒤로 가지 않는다
+        self.assertTrue(all(0.0 <= f <= 1.0 for f in seen))
+        self.assertTrue(any(0.0 < f < 1.0 for f in seen), seen)   # 중간 진행도 알린다
+        self.assertAlmostEqual(_probe(dst)[1], 180, delta=0.2)
+
+    def test_cancel_midway_removes_half_made_file_and_keeps_old_one(self):
+        src = _long_flac(self.tmp / "긴 종.flac", 180)
+        dst = self.out_dir / "keep.mp3"
+        dst.write_bytes(b"old")
+        cancel = threading.Event()
+        seen = []
+
+        def progress(f):
+            seen.append(f)
+            if f < 1.0:
+                cancel.set()
+        with self.assertRaises(ffmpeg.Cancelled):
+            sound_files.export_mp3(src, dst, on_progress=progress, cancel=cancel)
+        self.assertTrue(seen and seen[-1] < 1.0)
+        self.assertEqual(dst.read_bytes(), b"old")
+        self.assertEqual(self.leftovers(), [])
+
+    def test_cancel_before_start(self):
+        cancel = threading.Event()
+        cancel.set()
+        for src in (BELL, paths.sounds_dir() / "already.mp3"):
+            if src.suffix == ".mp3":
+                shutil.copy2(BELL, src)
+            with self.assertRaises(ffmpeg.Cancelled):
+                sound_files.export_mp3(src, self.out_dir / "x.mp3", cancel=cancel)
+        self.assertEqual(list(self.out_dir.iterdir()), [])
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows 우선순위")
+    def test_runs_below_bell_priority(self):
+        with mock.patch.object(ffmpeg.subprocess, "Popen", wraps=ffmpeg.subprocess.Popen) as popen:
+            sound_files.export_mp3(BELL, self.out_dir / "1.mp3")
+        flags = popen.call_args.kwargs["creationflags"]
+        self.assertTrue(flags & 0x00004000)                       # BELOW_NORMAL_PRIORITY_CLASS: 종소리가 먼저
 
 
 class DurationFormatTests(unittest.TestCase):

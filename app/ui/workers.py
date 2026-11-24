@@ -2,7 +2,7 @@
 import threading
 import urllib.request
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QCoreApplication, QThread, pyqtSignal
 
 _live = set()
 
@@ -40,6 +40,49 @@ def run_async(fn, *args, on_done=None, on_fail=None, **kwargs):
     keep_alive(th)
     th.start()
     return th
+
+
+class ProgressThread(QThread):
+    """진행 정도(0..1)를 알리고 취소할 수 있는 작업: fn(*args, on_progress=, cancel=).
+    프로그램을 끌 때 아직 돌고 있으면 취소하고 끝날 때까지 기다린다 (반쯤 만든 파일이 남지 않게)."""
+    progress = pyqtSignal(float)
+    done = pyqtSignal(object)
+    failed = pyqtSignal(str)
+    cancelled = pyqtSignal()
+
+    def __init__(self, fn, *args):
+        super().__init__()
+        self.fn = fn
+        self.args = args
+        self.cancel_event = threading.Event()
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self._on_quit)
+            self.finished.connect(self._forget_quit)
+
+    def _forget_quit(self):
+        try:
+            QCoreApplication.instance().aboutToQuit.disconnect(self._on_quit)
+        except (TypeError, RuntimeError, AttributeError):
+            pass
+
+    def cancel(self):
+        self.cancel_event.set()
+
+    def _on_quit(self):
+        self.cancel()
+        self.wait(5000)
+
+    def run(self):
+        try:
+            result = self.fn(*self.args, on_progress=self.progress.emit, cancel=self.cancel_event)
+        except Exception as e:
+            if self.cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.failed.emit(str(e) or e.__class__.__name__)
+            return
+        self.done.emit(result)
 
 
 class DownloadThread(QThread):

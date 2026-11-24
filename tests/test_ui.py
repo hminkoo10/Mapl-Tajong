@@ -16,7 +16,7 @@ from PyQt6.QtGui import QFont, QFontMetricsF
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QStackedWidget, QVBoxLayout, QWidget
 
-from app.core import paths
+from app.core import ffmpeg, paths, sound_files
 from app.data.db import init_schema
 from app.ui.context import AppContext
 from app.ui.pages.schedules import SchedulesPage, _SelectionBar
@@ -24,6 +24,7 @@ from app.ui.pages.sounds import SoundsPage
 from app.ui.select import Select
 from app.ui.theme import app_font, build_stylesheet, font, load_fonts, reset_font_cache
 from app.ui.widgets import ToastManager
+from app.ui.workers import ProgressThread, keep_alive
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -237,7 +238,8 @@ class UiRegressionTests(unittest.TestCase):
             if page.btn_mp3.isEnabled():
                 break
             QTest.qWait(20)
-        self.assertEqual(toasts[-1], ("MP3로 저장했어요", "success"))
+        self.assertEqual(toasts, [("MP3로 저장했어요", "success")])   # 금방 끝나면 막대 없이 끝났다는 안내만
+        self.assertFalse(page.mp3_strip.isVisible())
         saved = out.with_name("쉬는 시간.mp3")
         self.assertEqual(saved.read_bytes()[:3], b"ID3")
         self.assertEqual(sorted(p.name for p in out.parent.iterdir()), ["쉬는 시간.mp3"])
@@ -266,6 +268,86 @@ class UiRegressionTests(unittest.TestCase):
             self.assertGreaterEqual(b.width(), b.sizeHint().width() - 8, b.text())
         self.assertEqual(page.btn_stop.width(), page.btn_stop.sizeHint().width())
         self.render("sounds-row-1060")
+
+    def _long_sound(self, path, seconds=600):
+        r = ffmpeg._run(["-y", "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}:sample_rate=44100",
+                         "-ac", "2", "-c:a", "flac", str(path)], timeout=60, capture_stdout=False)
+        self.assertEqual(r.returncode, 0)
+        return path
+
+    def _wait_long(self, condition, seconds=8):
+        for _ in range(int(seconds * 50)):
+            if condition():
+                return
+            QTest.qWait(20)
+        self.assertTrue(condition())
+
+    @unittest.skipUnless(ffmpeg.available(), "ffmpeg 없음")
+    def _click_row(self, page, sound_id):
+        t = page.table
+        t.selectRow(next(r for r in range(t.rowCount()) if t.row_id(r) == sound_id))
+        QTest.qWait(30)
+
+    def test_long_mp3_save_shows_progress_and_can_be_cancelled(self):
+        tmp, page, toasts = self._sounds_page([(1, "긴 노래", "long.flac"), (2, "종", "bell1.wav")])
+        self._long_sound(paths.sounds_dir() / "long.flac")
+        self._click_row(page, 1)
+        out = tmp / "받은 파일"
+        out.mkdir()
+        with mock.patch("app.ui.pages.sounds.QFileDialog.getSaveFileName",
+                        return_value=(str(out / "긴 노래.mp3"), "MP3 (*.mp3)")):
+            QTest.mouseClick(page.btn_mp3, Qt.MouseButton.LeftButton)
+        self._wait_long(lambda: page.mp3_strip.isVisible() and page.mp3_bar.value() > 0)
+        self.assertRegex(page.mp3_label.text(), r"^‘긴 노래’ MP3로 저장하고 있어요 \d+%$")
+        self.assertTrue(page.btn_mp3_cancel.isEnabled())
+
+        # 저장하는 동안: 한 번에 하나만 저장하고, 읽고 있는 그 종소리는 고치거나 지울 수 없다 (듣기·이름은 된다)
+        self.assertFalse(page.btn_mp3.isEnabled())
+        self.assertFalse(page.btn_del.isEnabled())
+        self.assertFalse(page.btn_editor.isEnabled())
+        self.assertTrue(page.btn_play.isEnabled())
+        self.assertTrue(page.btn_info.isEnabled())
+        with mock.patch("app.ui.pages.sounds.confirm") as ask, \
+                mock.patch("app.ui.pages.sounds.open_editor_for_sound") as edit, \
+                mock.patch("app.ui.pages.sounds.QFileDialog.getSaveFileName") as pick:
+            page.on_delete()           # 오른쪽 클릭 메뉴로 불러도 아무 일 없음
+            page.on_editor()
+            page.on_save_mp3()
+        ask.assert_not_called()
+        edit.assert_not_called()
+        pick.assert_not_called()
+        self._click_row(page, 2)       # 다른 종소리는 고치거나 지울 수 있다
+        self.assertTrue(page.btn_del.isEnabled())
+        self.assertTrue(page.btn_editor.isEnabled())
+        self.assertFalse(page.btn_mp3.isEnabled())
+        self.render("sounds-mp3-progress")
+
+        QTest.mouseClick(page.btn_mp3_cancel, Qt.MouseButton.LeftButton)
+        self.assertEqual(page.mp3_label.text(), "취소하고 있어요")
+        self.assertFalse(page.btn_mp3_cancel.isEnabled())
+        self._wait_long(lambda: not page.mp3_strip.isVisible())
+        self.assertEqual(toasts[-1], ("저장을 취소했어요", "info"))
+        self.assertEqual(list(out.iterdir()), [])                 # 반쯤 만든 파일도 지운다
+        self.assertTrue(page.btn_mp3.isEnabled())
+        self._click_row(page, 1)
+        self.assertTrue(page.btn_del.isEnabled())
+
+    @unittest.skipUnless(ffmpeg.available(), "ffmpeg 없음")
+    def test_quitting_while_saving_mp3_removes_half_made_file(self):
+        tmp = Path(tempfile.mkdtemp(prefix="tajong_ui_quit_"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        src = self._long_sound(tmp / "긴 노래.flac")
+        out = tmp / "받은 파일"
+        out.mkdir()
+        th = ProgressThread(sound_files.export_mp3, src, out / "긴 노래.mp3")
+        seen = []
+        th.progress.connect(seen.append)
+        keep_alive(th)
+        th.start()
+        self._wait_long(lambda: bool(seen))
+        QApplication.instance().aboutToQuit.emit()                # 프로그램 끄기
+        self.assertTrue(th.isFinished())
+        self.assertEqual(list(out.iterdir()), [])
 
     def test_save_mp3_needs_a_sound(self):
         _, page, _ = self._sounds_page([])

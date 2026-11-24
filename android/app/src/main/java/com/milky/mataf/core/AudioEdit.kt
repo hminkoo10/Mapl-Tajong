@@ -225,23 +225,65 @@ object AudioEdit {
         }
     }
 
-    /** 종소리 파일을 MP3 로 out 에 쓴다. 원래 mp3 면 그대로 복사한다 */
-    suspend fun exportMp3(src: File, out: OutputStream) {
+    /**
+     * 종소리 파일을 MP3 로 out 에 쓴다. 원래 mp3 면 그대로 복사한다.
+     * onProgress(0..1) 는 1% 오를 때마다 부르고, 코루틴을 취소하면 바로 멈춘다.
+     */
+    suspend fun exportMp3(src: File, out: OutputStream, onProgress: (Float) -> Unit = {}) {
         if (!src.exists()) throw IllegalStateException("종소리 파일을 찾을 수 없어요.")
+        var shown = -1
+        val report = { f: Float ->
+            val pct = (f.coerceIn(0f, 1f) * 100).toInt()
+            if (pct > shown) {
+                shown = pct; onProgress(pct / 100f)
+            }
+        }
         if (src.extension.equals("mp3", ignoreCase = true)) {
-            src.inputStream().use { it.copyTo(out) }
+            val total = src.length().coerceAtLeast(1)
+            var done = 0L
+            src.inputStream().use { inp ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val n = inp.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    done += n
+                    report(done.toFloat() / total)
+                }
+            }
+            report(1f)
             return
         }
+        val total = durationSec(src)
         var enc: Mp3Encoder? = null
         try {
-            decode(src) { _, s, ch, rate ->
+            decode(src) { at, s, ch, rate ->
                 val e = enc ?: Mp3Encoder(rate, ch).also { enc = it }
                 e.encode(s, ch, out)
+                if (total > 0) report(((at + s.size / ch / rate.toDouble()) / total).toFloat())
                 true
             }
             (enc ?: throw IllegalStateException("소리를 풀지 못했어요.")).finish(out)
+            report(1f)
         } finally {
             enc?.close()
+        }
+    }
+
+    /** 소리 길이(초). 모르면 0 */
+    private fun durationSec(file: File): Double {
+        val ex = MediaExtractor()
+        return try {
+            ex.setDataSource(file.absolutePath)
+            (0 until ex.trackCount).map { ex.getTrackFormat(it) }
+                .firstOrNull { it.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                ?.takeIf { it.containsKey(MediaFormat.KEY_DURATION) }
+                ?.getLong(MediaFormat.KEY_DURATION)?.div(1e6) ?: 0.0
+        } catch (e: Exception) {
+            0.0
+        } finally {
+            ex.release()
         }
     }
 

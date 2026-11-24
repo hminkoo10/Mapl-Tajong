@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from PyQt6.QtCore import QSize, QStandardPaths, Qt, QTimer
-from PyQt6.QtWidgets import QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QProgressBar, QVBoxLayout,
+                             QWidget)
 
 from app.core import sound_files
 from app.core.paths import sound_file_path
@@ -13,7 +14,7 @@ from app.ui.sound_editor import open_editor_for_sound
 from app.ui.tables import PillDelegate, SmartTable, TextDelegate
 from app.ui.theme import C
 from app.ui.widgets import Button, EqualizerBars, IconButton, PageHeader
-from app.ui.workers import run_async
+from app.ui.workers import ProgressThread, keep_alive, run_async
 from app.ui.youtube_dialog import YoutubeDialog
 
 
@@ -31,6 +32,9 @@ class SoundsPage(QWidget):
         super().__init__()
         self.ctx = ctx
         self.conn = ctx.conn
+        self._mp3 = None       # MP3로 저장하는 작업 (한 번에 하나)
+        self._mp3_id = None    # 저장하고 있는 종소리
+        self._mp3_text = ""
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 26, 28, 20)
         root.setSpacing(16)
@@ -58,6 +62,23 @@ class SoundsPage(QWidget):
             bar.addWidget(b)
         root.addLayout(bar)
 
+        # MP3로 저장하는 동안 보이는 줄 (금방 끝나면 나타나지 않고 끝났다는 안내만 나온다)
+        self.mp3_strip = QWidget()
+        sl = QHBoxLayout(self.mp3_strip)
+        sl.setContentsMargins(4, 0, 0, 0)
+        sl.setSpacing(12)
+        self.mp3_label = QLabel("")
+        self.mp3_label.setStyleSheet(f"color: {C.grey700}; font-size: 14px;")
+        self.mp3_bar = QProgressBar()
+        self.mp3_bar.setRange(0, 1000)
+        self.mp3_bar.setStyleSheet(f"QProgressBar {{ background: {C.grey200}; }}")   # 회색 화면 위에서도 남은 길이가 보이게
+        self.btn_mp3_cancel = Button("취소", variant="subtle", size="sm")
+        sl.addWidget(self.mp3_label)
+        sl.addWidget(self.mp3_bar, 1)
+        sl.addWidget(self.btn_mp3_cancel)
+        self.mp3_strip.hide()
+        root.addWidget(self.mp3_strip)
+
         self.table = SmartTable(["", "이름", "길이", "기본 음량", "쓰는 곳", "파일"], check_col=False)
         self.table.setItemDelegateForColumn(1, TextDelegate(self.table, px=15))
         self.table.setItemDelegateForColumn(4, PillDelegate(self.table))
@@ -80,6 +101,7 @@ class SoundsPage(QWidget):
         self.btn_editor.clicked.connect(self.on_editor)
         self.btn_info.clicked.connect(self.on_info)
         self.btn_mp3.clicked.connect(self.on_save_mp3)
+        self.btn_mp3_cancel.clicked.connect(self.on_cancel_mp3)
         self.btn_del.clicked.connect(self.on_delete)
         self.btn_play.clicked.connect(self.on_play)
         self.btn_stop.clicked.connect(self.on_stop)
@@ -155,10 +177,19 @@ class SoundsPage(QWidget):
         ids = self.table.selected_ids()
         return repo.get_sound(self.conn, ids[0]) if ids else None
 
+    def _saving_mp3_of(self, sound_id):
+        return self._mp3 is not None and sound_id == self._mp3_id
+
     def _sync_buttons(self):
-        on = bool(self.table.selected_ids())
-        for b in (self.btn_editor, self.btn_info, self.btn_mp3, self.btn_del, self.btn_play):
+        ids = self.table.selected_ids()
+        on = bool(ids)
+        # MP3로 저장하는 동안 그 종소리 파일은 고치거나 지우지 않는다 (읽고 있는 파일이라 꼬인다)
+        busy = on and self._saving_mp3_of(ids[0])
+        for b in (self.btn_info, self.btn_play):
             b.setEnabled(on)
+        for b in (self.btn_editor, self.btn_del):
+            b.setEnabled(on and not busy)
+        self.btn_mp3.setEnabled(on and self._mp3 is None)
 
     def _done(self, new_id, msg):
         self.ctx.changed("sounds")
@@ -197,7 +228,7 @@ class SoundsPage(QWidget):
 
     def on_editor(self):
         s = self._selected()
-        if not s:
+        if not s or self._saving_mp3_of(int(s["id"])):
             return
         rid = open_editor_for_sound(self.ctx, s, self)
         if rid:
@@ -216,32 +247,68 @@ class SoundsPage(QWidget):
 
     def on_save_mp3(self):
         s = self._selected()
-        if not s:
+        if not s or self._mp3 is not None:
             return
         start = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation))
         path, _ = QFileDialog.getSaveFileName(self, "MP3로 저장", str(start / f"{sound_files.safe_stem(s['name'])}.mp3"),
                                               "MP3 (*.mp3)")
-        if not path:
+        if not path or self._mp3 is not None:
             return
         if not path.lower().endswith(".mp3"):
             path += ".mp3"
-        self.btn_mp3.setEnabled(False)
-        self.ctx.toast("MP3로 저장하고 있어요")
+        name = str(s["name"])
+        th = ProgressThread(sound_files.export_mp3, sound_file_path(str(s["file_name"])), path)
+        self._mp3, self._mp3_id = th, int(s["id"])
+        self._mp3_text = f"‘{name if len(name) <= 20 else name[:19] + '…'}’ MP3로 저장하고 있어요"
+        th.progress.connect(self._mp3_progress)
+        th.done.connect(self._mp3_done)
+        th.failed.connect(self._mp3_failed)
+        th.cancelled.connect(self._mp3_cancelled)
+        keep_alive(th)
+        self.mp3_bar.setValue(0)
+        self.mp3_label.setText(self._mp3_text)
+        self.btn_mp3_cancel.setEnabled(True)
+        self._sync_buttons()
+        th.start()
+        QTimer.singleShot(300, self._mp3_reveal)
 
-        def done(_):
-            self._sync_buttons()
-            self.ctx.toast("MP3로 저장했어요", "success")
+    def _mp3_reveal(self):
+        if self._mp3 is not None:
+            self.mp3_strip.show()
 
-        def fail(msg):
-            self._sync_buttons()
-            notify(self, "저장하지 못했어요", error_message(
-                "저장할 폴더와 남은 공간을 확인하세요.", msg))
+    def _mp3_progress(self, frac):
+        if self._mp3 is None or self._mp3.cancel_event.is_set():
+            return
+        self.mp3_bar.setValue(int(frac * 1000))
+        self.mp3_label.setText(f"{self._mp3_text} {int(frac * 100)}%")
 
-        run_async(sound_files.export_mp3, sound_file_path(str(s["file_name"])), path, on_done=done, on_fail=fail)
+    def on_cancel_mp3(self):
+        if self._mp3 is not None:
+            self._mp3.cancel()
+            self.btn_mp3_cancel.setEnabled(False)
+            self.mp3_label.setText("취소하고 있어요")
+
+    def _mp3_finish(self):
+        self._mp3, self._mp3_id = None, None
+        self.mp3_strip.hide()
+        self._sync_buttons()
+
+    def _mp3_done(self, _):
+        self._mp3_finish()
+        self.ctx.toast("MP3로 저장했어요", "success")
+
+    def _mp3_cancelled(self):
+        self._mp3_finish()
+        self.ctx.toast("저장을 취소했어요")
+
+    def _mp3_failed(self, msg):
+        self._mp3_finish()
+        notify(self, "저장하지 못했어요", error_message(
+            "저장할 폴더와 남은 공간을 확인하세요.", msg))
 
     def on_delete(self):
         s = self._selected()
-        if not s:
+        if not s or self._saving_mp3_of(int(s["id"])):
             return
         n = repo.sound_usage_counts(self.conn).get(int(s["id"]), 0)
         if n:
@@ -278,11 +345,12 @@ class SoundsPage(QWidget):
         m = Menu(self)
         if r >= 0:
             m.addAction("들어보기", self.on_play)
-            m.addAction("자르기·다듬기", self.on_editor)
+            busy = self._saving_mp3_of(self.table.row_id(r))
+            m.addAction("자르기·다듬기", self.on_editor).setEnabled(not busy)
             m.addAction("이름·음량", self.on_info)
-            m.addAction("MP3로 저장", self.on_save_mp3)
+            m.addAction("MP3로 저장", self.on_save_mp3).setEnabled(self._mp3 is None)
             m.addSeparator()
-            m.addAction("삭제", self.on_delete)
+            m.addAction("삭제", self.on_delete).setEnabled(not busy)
             m.addSeparator()
         m.addAction("인터넷에서 찾기", self.on_youtube)
         m.addAction("파일 추가", self.on_add)
